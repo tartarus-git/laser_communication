@@ -1,6 +1,5 @@
 // Pins.
-#define PHOTORESISTOR 0 // TODO: Find the pin for this. Apparently you can use like A0 and such. Figure out how that works in the context of C++ language spec.
-                        // Almost definitely just a macro. Like #define something.
+#define PHOTORESISTOR A0
 
 // Serial.
 #define BAUD_RATE 9600
@@ -9,14 +8,16 @@
 #define CLEARANCE 10
 #define BUFFER_SIZE 1024
 
-const short baseline; // TODO: See if this const somehow optimizes the greater than baseline + CLEARANCE thing.
+short baseline;
 
 void setup() {
   // Initialize serial.
   Serial.begin(BAUD_RATE);
 
-  // Get the baseline environmental brightness.
-  baseline = analogRead(PHOTORESISTOR);
+  // Pins are inputs by default, so no need for pinMode() here.
+
+  // Set the baseline brightness to the environmental brightness plus the clearance.
+  baseline = analogRead(PHOTORESISTOR) + CLEARANCE;
 }
 
 short pos = 0;
@@ -27,30 +28,30 @@ bool state = false;
 
 void sendBuffer() {
   // Send the buffer to computer over serial.
-  // TODO: Finish this.
+  Serial.write(buffer, pos);
 }
 
 void incrementPos() {
   if (charPos == 7) {
       charPos = 0;
-      if (pos == BUFFER_SIZE) {
-        sendBuffer(); // TODO: Make this support non-full buffers as edge case ending things. Use the int as param I think.
-        pos = 0;
-        continue;
-      }
       pos++;
-      continue;
+      if (pos == BUFFER_SIZE) {
+        sendBuffer();
+        pos = 0;
+      }
     }
     charPos++;
 }
 
 void loop() {
-  if (analogRead(PHOTORESISTOR) > baseline + CLEARANCE) {
-    if (state) { continue; }
+  if (analogRead(PHOTORESISTOR) > baseline) {
+    if (state) { return; }
     buffer[pos] |= HIGH << charPos;
-  } else {
-    if (state) {
-      incrementPosition();
-    }
+    state = true;
+    return;
+  }
+  if (state) {
+    incrementPos();
+    state = false;
   }
 }
