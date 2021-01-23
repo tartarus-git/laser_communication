@@ -5,6 +5,9 @@
 #define BAUD_RATE 9600
 
 // Laser.
+#define TRANSMISSION_INTERVAL 100 // In microseconds.
+#define SYNC_POINT 100
+
 #define CLEARANCE 10
 #define BUFFER_SIZE 1024
 
@@ -20,18 +23,18 @@ void setup() {
   baseline = analogRead(PHOTORESISTOR) + CLEARANCE;
 }
 
+short syncCounter = 0;
+
 short pos = 0;
 char charPos = 0;
 char buffer[BUFFER_SIZE];
-
-bool state = false;
 
 void sendBuffer() {
   // Send the buffer to computer over serial.
   Serial.write(buffer, pos);
 }
 
-void incrementPos() {
+void incrementPos() {   // TODO: You have to calculate the length of the transmission somewhere, because or else you're not going to know when to send the buffer.
   if (charPos == 7) {
       charPos = 0;
       pos++;
@@ -43,15 +46,31 @@ void incrementPos() {
     charPos++;
 }
 
+bool isSyncing;
+void resync() {
+  isSyncing = false;
+}
+
 void loop() {
-  if (analogRead(PHOTORESISTOR) > baseline) {
-    if (state) { return; }
-    buffer[pos] |= HIGH << charPos;
-    state = true;
-    return;
-  }
-  if (state) {
-    incrementPos();
-    state = false;
+  if (analogRead(PHOTORESISTOR)) {      // TODO: Use a non-sleep-reliant method to transfer metadata about the connection before attempting the high-speed transfer.
+    while (true) {
+      delayMicroseconds(TRANSMISSION_INTERVAL);
+      if (analogRead(PHOTORESISTOR)) {
+        buffer[pos] |= HIGH << charPos;
+        incrementPos();
+        continue;
+      }
+      incrementPos();
+      if (syncCounter == SYNC_POINT) {
+        syncCounter = 0;
+        isSyncing = true;
+        attachInterrupt(digitalPinToInterrupt(PHOTORESISTOR), resync, RISING);
+        while (isSyncing) { }
+        delayMicroseconds(TRANSMISSION_INTERVAL);       // TODO: Add some offset define so that this isn't too close to the edge of a value.
+                                                        // Of course, only if it's a problem.
+        continue;
+      }
+      syncCounter++;
+    }
   }
 }
