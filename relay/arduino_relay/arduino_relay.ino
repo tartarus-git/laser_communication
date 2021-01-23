@@ -6,6 +6,7 @@
 
 // Laser.
 #define TRANSMISSION_INTERVAL 100 // In microseconds.
+#define RECEIVE_OFFSET 10 // In microseconds.
 #define SYNC_POINT 100
 
 #define CLEARANCE 10
@@ -48,10 +49,11 @@ void incrementPos() {   // TODO: You have to calculate the length of the transmi
 
 void loop() {
   if (analogRead(PHOTORESISTOR) > baseline) {      // TODO: Use a non-sleep-reliant method to transfer metadata about the connection before attempting the high-speed transfer.
+    delayMicroseconds(RECEIVE_OFFSET); // TODO: This probably doesn't do anything because the arduino can't time travel. This probably makes it worse.
     while (true) {
       delayMicroseconds(TRANSMISSION_INTERVAL);
       if (analogRead(PHOTORESISTOR) > baseline) {
-        buffer[pos] |= HIGH << charPos;
+        buffer[pos] |= 1 << charPos;            // TODO: See if it's possible to use HIGH here instead of one for more intent and such.
         incrementPos();
         continue;
       }
