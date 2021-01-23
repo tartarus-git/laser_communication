@@ -46,16 +46,11 @@ void incrementPos() {   // TODO: You have to calculate the length of the transmi
     charPos++;
 }
 
-bool isSyncing;
-void resync() {
-  isSyncing = false;
-}
-
 void loop() {
-  if (analogRead(PHOTORESISTOR)) {      // TODO: Use a non-sleep-reliant method to transfer metadata about the connection before attempting the high-speed transfer.
+  if (analogRead(PHOTORESISTOR) > baseline) {      // TODO: Use a non-sleep-reliant method to transfer metadata about the connection before attempting the high-speed transfer.
     while (true) {
       delayMicroseconds(TRANSMISSION_INTERVAL);
-      if (analogRead(PHOTORESISTOR)) {
+      if (analogRead(PHOTORESISTOR) > baseline) {
         buffer[pos] |= HIGH << charPos;
         incrementPos();
         continue;
@@ -63,9 +58,9 @@ void loop() {
       incrementPos();
       if (syncCounter == SYNC_POINT) {
         syncCounter = 0;
-        isSyncing = true;
-        attachInterrupt(digitalPinToInterrupt(PHOTORESISTOR), resync, RISING);
-        while (isSyncing) { }
+        while (true) {
+          if (analogRead(PHOTORESISTOR) > baseline) { break; }
+        }
         delayMicroseconds(TRANSMISSION_INTERVAL);       // TODO: Add some offset define so that this isn't too close to the edge of a value.
                                                         // Of course, only if it's a problem.
         continue;

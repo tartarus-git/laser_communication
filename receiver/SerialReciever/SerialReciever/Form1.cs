@@ -17,7 +17,7 @@ namespace SerialReciever
         static int pos = 0;
 
         // TODO: Make the COM thing variable to avoid presentation mess-ups.
-        static SerialPort Serial = new SerialPort("COM3", 9600);
+        static SerialPort Serial;
         // TODO: Check that this whole static thing is the best way to go. Is there a better way.
         static PictureBox Picture;
 
@@ -27,7 +27,9 @@ namespace SerialReciever
         private void Form1_Load(object sender, EventArgs e)
         {
             Picture = pictureBox;
-            Serial.DataReceived += DimReceived;
+            Serial = new SerialPort("COM3", 9600);
+            Serial.DataReceived += new SerialDataReceivedEventHandler(DimReceived);
+            Serial.Open();
         }
 
         static byte[] DimBuf = new byte[8];
@@ -35,6 +37,8 @@ namespace SerialReciever
 
         static void DimReceived(object sender, SerialDataReceivedEventArgs e)
         {
+            Console.WriteLine("Recieved first bytes. Parsing dimensions of image...");
+
             int BytesRead = Serial.Read(DimBuf, pos, 8 - pos);
             pos += BytesRead;
             if (pos == 8)
@@ -45,6 +49,7 @@ namespace SerialReciever
                     {
                         int width = *(int*)ptr;
                         int height = *(int*)(ptr + 4);
+                        Console.WriteLine("Dimensions: " + width + ", " + height);
                         buffer = new byte[width * 4 * height];
                         // Create a new bitmap if the dimensions from before aren't valid anymore or it doesn't exist.
                         if (bmp == null || bmp.Width != width || bmp.Height != height)
