@@ -7,8 +7,10 @@
 #include <thread>
 
 // Transmission
-#define TRANSMISSION_INTERVAL 1		// TODO: Change the unit of this. This is probably going to need to be in nanoseconds or at least microseconds or something.
-#define SLEEP std::this_thread::sleep_for(std::chrono::microseconds(TRANSMISSION_INTERVAL))
+#define TRANSMISSION_INTERVAL 100
+#define SLEEP std::this_thread::sleep_for(std::chrono::microseconds(TRANSMISSION_INTERVAL))		// TODO: Is this the proper way. I was just winging it.
+
+#define SYNC_POINT 100
 
 // Pins
 #define BUTTON 15
@@ -31,27 +33,38 @@ void log(const char* message) {
 
 #define BIT_MASK 0xF1
 
-void setSignal(bool data) {
-	if (data) { digitalWrite(LASER, HIGH); }
-	else { digitalWrite(LASER, LOW); }
-}
-
 void sendByte(char data) {
-	setSignal(data & BIT_MASK);
+	digitalWrite(LASER, data & BIT_MASK);
 	SLEEP;
 	for (int i = 1; i < 7; i++) {
-		setSignal((data >> i) & BIT_MASK);
+		digitalWrite(LASER, (data >> i) & BIT_MASK);
 		SLEEP;
 	}
-	setSignal(data >> 7);
+	digitalWrite(LASER, data >> 7);
+	SLEEP;
+}
+
+short syncCounter = 0;
+
+void synchronize() {
+	digitalWrite(LASER, LOW);			// How much power does this take. Does it make sense to check the value first or would that be inefficient. TODO.
+	SLEEP;
+	syncCounter = 0;
+	digitalWrite(LASER, HIGH);
 	SLEEP;
 }
 
 void transmit(char* data, int length) {
 	// Send the data over the laser to the recieving device.
-	setSignal(true);
+	digitalWrite(LASER, HIGH);
 	SLEEP;
 	for (int i = 0; i < length; i++) {
+		if (syncCounter == SYNC_POINT) {
+			synchronize();
+		}
+		else {					// TODO: Change the format so the else is on the line above. It looks better, even though it isn't consistant with VS.
+			syncCounter++;
+		}
 		sendByte(data[i]);
 	}
 }
