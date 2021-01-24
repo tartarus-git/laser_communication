@@ -18,6 +18,8 @@ void setup() {
   // Initialize serial.
   Serial.begin(BAUD_RATE);
 
+  while (!Serial) { }         // Wait for initialization. This is because the serial-to-usb chip is async. This isn't necessary for serial pins.
+
   // Pins are inputs by default, so no need for pinMode() here.
 
   // Set the baseline brightness to the environmental brightness plus the clearance.
@@ -32,17 +34,19 @@ char buffer[BUFFER_SIZE];
 
 void sendBuffer() {
   // Send the buffer to computer over serial.
-  Serial.write(buffer, pos);
+  Serial.write(buffer, pos);      // TODO: If this is the only thing in here, then there isn't really a need for a function is there.
 }
 
 void incrementPos() {   // TODO: You have to calculate the length of the transmission somewhere, because or else you're not going to know when to send the buffer.
   if (charPos == 7) {
       charPos = 0;
-      pos++;
-      if (pos == BUFFER_SIZE) {
+      if (pos == BUFFER_SIZE - 1) {
         sendBuffer();
         pos = 0;
+        return;
       }
+      pos++;
+      return;
   }
   charPos++;
 }
@@ -63,7 +67,7 @@ void loop() {
       syncCounter++;
       if (analogRead(PHOTORESISTOR) > baseline) {
         buffer[pos] |= 1 << charPos;            // TODO: See if it's possible to use HIGH here instead of one for more intent and such.
-        incrementPos();                   // TODO: You can put this at the top of the loop so that you avoid writing it twice down here.
+        incrementPos();                   // TODO: You can put this at the top of the loop so that you avoid writing it twice down here. Not without some changing around of other stuff though. See if you can make this work.
         continue;
       }
       buffer[pos] &= ~(1 << charPos);       // TODO: Maybe make the charPos shifts into some sort of function or something. Is this the most efficient way?

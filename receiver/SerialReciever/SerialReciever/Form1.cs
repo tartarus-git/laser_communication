@@ -4,6 +4,7 @@ using System.IO.Ports;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace SerialReciever
 {
@@ -32,7 +33,9 @@ namespace SerialReciever
             Serial.Open();
 
             // Send some useless data just so I can see if the light on the Arduino lights up.
-            Serial.WriteLine("A");
+            Serial.Write(Encoding.ASCII.GetBytes("A"), 0, 1);
+
+            Serial.DiscardInBuffer(); // This is necessary because there is still stuff left in there from the program upload to arduino or something. Really weid. Find out more about it if you can. TODO.
         }
 
         static byte[] DimBuf = new byte[8];
