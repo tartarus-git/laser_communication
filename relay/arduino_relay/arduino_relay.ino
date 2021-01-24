@@ -43,8 +43,8 @@ void incrementPos() {   // TODO: You have to calculate the length of the transmi
         sendBuffer();
         pos = 0;
       }
-    }
-    charPos++;
+  }
+  charPos++;
 }
 
 void loop() {
@@ -52,22 +52,22 @@ void loop() {
     delayMicroseconds(RECEIVE_OFFSET); // TODO: This probably doesn't do anything because the arduino can't time travel. This probably makes it worse.
     while (true) {
       delayMicroseconds(TRANSMISSION_INTERVAL);
-      if (analogRead(PHOTORESISTOR) > baseline) {
-        buffer[pos] |= 1 << charPos;            // TODO: See if it's possible to use HIGH here instead of one for more intent and such.
-        incrementPos();
-        continue;
-      }
-      incrementPos();
       if (syncCounter == SYNC_POINT) {
         syncCounter = 0;
         while (true) {
           if (analogRead(PHOTORESISTOR) > baseline) { break; }
         }
-        delayMicroseconds(TRANSMISSION_INTERVAL);       // TODO: Add some offset define so that this isn't too close to the edge of a value.
-                                                        // Of course, only if it's a problem.
+        delayMicroseconds(RECEIVE_OFFSET);    // TODO: This almost definitely doesn't do anything, you can probably remove the offsets because arduino is behind.
         continue;
       }
       syncCounter++;
+      if (analogRead(PHOTORESISTOR) > baseline) {
+        buffer[pos] |= 1 << charPos;            // TODO: See if it's possible to use HIGH here instead of one for more intent and such.
+        incrementPos();                   // TODO: You can put this at the top of the loop so that you avoid writing it twice down here.
+        continue;
+      }
+      buffer[pos] &= ~(1 << charPos);       // TODO: Maybe make the charPos shifts into some sort of function or something. Is this the most efficient way?
+      incrementPos();
     }
   }
 }

@@ -81,6 +81,7 @@ namespace SerialReciever
                         }
                     }
                 }
+                mode = true;
                 pos = 0;
             }
         }
