@@ -6,7 +6,7 @@
 
 // Laser.
 #define TRANSMISSION_INTERVAL 100 // In microseconds.
-#define RECEIVE_OFFSET 10 // In microseconds.
+#define RECEIVE_OFFSET 10 // In microseconds.     // TODO: This might not even be necessary.
 #define SYNC_POINT 100
 
 #define CLEARANCE 10

@@ -28,18 +28,39 @@ namespace SerialReciever
         {
             Picture = pictureBox;
             Serial = new SerialPort("COM3", 9600);
-            Serial.DataReceived += new SerialDataReceivedEventHandler(DimReceived);
+            Serial.DataReceived += DataReceived;
             Serial.Open();
+
+            // Send some useless data just so I can see if the light on the Arduino lights up.
+            Serial.WriteLine("A");
         }
 
         static byte[] DimBuf = new byte[8];
         static byte[] buffer;
 
-        static void DimReceived(object sender, SerialDataReceivedEventArgs e)
+        static bool mode = false;
+
+        static void DataReceived(object sender, SerialDataReceivedEventArgs e)
         {
+            int BytesRead;
+            if (mode)
+            {
+                BytesRead = Serial.Read(buffer, pos, buffer.Length - pos);
+                pos += BytesRead;
+                if (pos == buffer.Length)
+                {
+                    Console.WriteLine("Finished receiving data and now showing bitmap.");
+                    BitmapData bmpData = bmp.LockBits(bounds, ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+                    Marshal.Copy(buffer, 0, bmpData.Scan0, buffer.Length);
+                    bmp.UnlockBits(bmpData);
+                    pos = 0;
+                }
+                return;
+            }
+
             Console.WriteLine("Recieved first bytes. Parsing dimensions of image...");
 
-            int BytesRead = Serial.Read(DimBuf, pos, 8 - pos);
+            BytesRead = Serial.Read(DimBuf, pos, 8 - pos);
             pos += BytesRead;
             if (pos == 8)
             {
@@ -60,21 +81,6 @@ namespace SerialReciever
                         }
                     }
                 }
-                pos = 0;
-                Serial.DataReceived -= DimReceived;
-                Serial.DataReceived += DataReceived;
-            }
-        }
-
-        static void DataReceived(object sender, SerialDataReceivedEventArgs e)
-        {
-            int BytesRead = Serial.Read(buffer, pos, buffer.Length - pos);
-            pos += BytesRead;
-            if (pos == buffer.Length)
-            {
-                BitmapData bmpData = bmp.LockBits(bounds, ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
-                Marshal.Copy(buffer, 0, bmpData.Scan0, buffer.Length);
-                bmp.UnlockBits(bmpData);
                 pos = 0;
             }
         }
