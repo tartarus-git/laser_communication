@@ -91,6 +91,10 @@ void press() {
 		}
 		f.close();
 
+		char* test = buffer.get();
+		printf("Width gotten: %d\n", *(int*)test);
+		printf("Height gotten: %d\n", *(int*)(test + 4));
+
 		log("Sending data over laser...");
 		transmit(buffer.get(), length);		// TODO: This get() here is okay right? If some sort of exception occurs, were safe, even in the other function right?
 
