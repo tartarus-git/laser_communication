@@ -31,7 +31,8 @@ void log(const char* message) {
 				// responsibility for it from the unique_ptr.
 }
 
-#define BIT_MASK 0xF1
+//#define BIT_MASK 0x01
+#define BIT_MASK 0b00000001		// TODO: Using this for now, but after debugging, we should switch back to hex because it looks nicer.
 
 void sendByte(char data) {
 	digitalWrite(LASER, data & BIT_MASK);
@@ -67,6 +68,8 @@ void transmit(char* data, int length) {
 		}
 		sendByte(data[i]);
 	}
+	// Reset the laser pin back to low so we don't trigger another receive on the Arduino.
+	digitalWrite(LASER, LOW);
 }
 
 void press() {
