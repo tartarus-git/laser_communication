@@ -65,6 +65,8 @@ namespace SerialReciever
 
             BytesRead = Serial.Read(DimBuf, pos, 8 - pos);
             pos += BytesRead;
+
+            Console.WriteLine("New pos: " + pos);
             if (pos == 8)
             {
                 unsafe

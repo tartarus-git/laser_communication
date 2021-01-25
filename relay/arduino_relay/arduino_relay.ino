@@ -5,12 +5,14 @@
 #define BAUD_RATE 9600
 
 // Laser.
-#define TRANSMISSION_INTERVAL 100 // In microseconds.
+#define TRANSMISSION_INTERVAL 1000 // In milliseconds. TODO: Change this to microseconds.
 #define RECEIVE_OFFSET 10 // In microseconds.     // TODO: This might not even be necessary.
 #define SYNC_POINT 100
 
 #define CLEARANCE 10
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE 8     // TODO: Change this to a larger buffer size and such.
+
+#define SLEEP delay(TRANSMISSION_INTERVAL);
 
 short baseline;
 
@@ -21,6 +23,8 @@ void setup() {
   while (!Serial) { }         // Wait for initialization. This is because the serial-to-usb chip is async. This isn't necessary for serial pins.
 
   // Pins are inputs by default, so no need for pinMode() here.
+
+  pinMode(13, OUTPUT); // Except this one, which we are using for debugging purposes. TODO.
 
   // Set the baseline brightness to the environmental brightness plus the clearance.
   baseline = analogRead(PHOTORESISTOR) + CLEARANCE;
@@ -34,11 +38,16 @@ char buffer[BUFFER_SIZE];
 
 void sendBuffer() {
   // Send the buffer to computer over serial.
-  Serial.write(buffer, pos);      // TODO: If this is the only thing in here, then there isn't really a need for a function is there.
+  Serial.write(buffer, pos + 1);      // TODO: If this is the only thing in here, then there isn't really a need for a function is there.
+  Serial.flush();
 }
+
+bool ledState = LOW;
 
 void incrementPos() {   // TODO: You have to calculate the length of the transmission somewhere, because or else you're not going to know when to send the buffer.
   if (charPos == 7) {
+      ledState = !ledState;
+      digitalWrite(13, ledState);
       charPos = 0;
       if (pos == BUFFER_SIZE - 1) {
         sendBuffer();
@@ -55,7 +64,7 @@ void loop() {
   if (analogRead(PHOTORESISTOR) > baseline) {      // TODO: Use a non-sleep-reliant method to transfer metadata about the connection before attempting the high-speed transfer.
     delayMicroseconds(RECEIVE_OFFSET); // TODO: This probably doesn't do anything because the arduino can't time travel. This probably makes it worse.
     while (true) {
-      delayMicroseconds(TRANSMISSION_INTERVAL);
+      SLEEP;
       if (syncCounter == SYNC_POINT) {
         syncCounter = 0;
         while (true) {
