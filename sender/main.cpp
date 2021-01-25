@@ -1,5 +1,5 @@
 #include <wiringPi.h>
-//#include <iostream> // TODO: Research about including this, and then probably include it because C++ standard and whatnot. Why does stdio.h work instead of this for DoorSensor?
+#include <iostream> // TODO: Research about including this, and then probably include it because C++ standard and whatnot. Why does stdio.h work instead of this for DoorSensor?
 #include <cstring>
 #include <fstream>
 #include <memory>
@@ -7,7 +7,7 @@
 #include <thread>
 
 // Transmission
-#define TRANSMISSION_INTERVAL 100
+#define TRANSMISSION_INTERVAL 1000000		// This is in microseconds.
 #define SLEEP std::this_thread::sleep_for(std::chrono::microseconds(TRANSMISSION_INTERVAL))		// TODO: Is this the proper way. I was just winging it.
 
 #define SYNC_POINT 100
@@ -23,9 +23,10 @@
 
 void log(const char* message) {
 	int len = strlen(message);
-	std::unique_ptr<char[]> buffer = std::make_unique<char[]>(len + 1);
+	std::unique_ptr<char[]> buffer = std::make_unique<char[]>(len + 1 + 1);
 	memcpy(buffer.get(), message, len);
 	buffer[len] = '\n';
+	buffer[len + 1] = '\0';
 	printf(buffer.get());
 	buffer.reset(); 	// This frees the memory and sets the pointer inside of the unique_ptr to null. Don't use release(), it won't free the memory, just release
 				// responsibility for it from the unique_ptr.
@@ -58,6 +59,7 @@ void synchronize() {
 void transmit(char* data, int length) {
 	// Send the data over the laser to the recieving device.
 	digitalWrite(LASER, HIGH);
+	log("Set high for com start.");
 	SLEEP;
 	for (int i = 0; i < length; i++) {
 		if (syncCounter == SYNC_POINT) {
@@ -67,7 +69,9 @@ void transmit(char* data, int length) {
 			syncCounter++;
 		}
 		sendByte(data[i]);
+		log("Sent a byte of data.");
 	}
+	log("Done sending the data. Setting back to low.");
 	// Reset the laser pin back to low so we don't trigger another receive on the Arduino.
 	digitalWrite(LASER, LOW);
 }
