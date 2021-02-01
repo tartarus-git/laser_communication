@@ -6,12 +6,6 @@
 #include <chrono>
 #include <thread>
 
-// Transmission
-#define TRANSMISSION_INTERVAL 1000000		// This is in microseconds.
-#define SLEEP std::this_thread::sleep_for(std::chrono::microseconds(TRANSMISSION_INTERVAL))		// TODO: Is this the proper way. I was just winging it.
-
-#define SYNC_POINT 100
-
 // Pins
 #define BUTTON 15
 #define BUTTON_SOURCE 16
@@ -32,48 +26,95 @@ void log(const char* message) {
 				// responsibility for it from the unique_ptr.
 }
 
-//#define BIT_MASK 0x01
-#define BIT_MASK 0b00000001		// TODO: Using this for now, but after debugging, we should switch back to hex because it looks nicer.
+#define DESC_BIT_DURATION 100		// milliseconds.
 
-void sendByte(char data) {
-	digitalWrite(LASER, data & BIT_MASK);
-	SLEEP;
-	for (int i = 1; i < 7; i++) {
-		digitalWrite(LASER, (data >> i) & BIT_MASK);
-		SLEEP;
+struct ConnectionDescriptor {
+	int16_t syncInterval;         // The amount of bytes between each synchronization plus 1.
+	uint16_t bitDuration;
+	uint8_t durationType;
+} desc;
+
+void sleep() {
+	if (desc.durationType) {
+		std::this_thread::sleep_for(std::chrono::microseconds(desc.bitDuration));		// TODO: Is this the proper way to do this?
+		return;
 	}
-	digitalWrite(LASER, data >> 7);
-	SLEEP;
+	delay(desc.bitDuration);
 }
 
-short syncCounter = 0;
+#define BIT_MASK 0x01
 
-void synchronize() {
-	digitalWrite(LASER, LOW);			// How much power does this take. Does it make sense to check the value first or would that be inefficient. TODO.
-	SLEEP;
-	syncCounter = 0;
-	digitalWrite(LASER, HIGH);
-	SLEEP;
+void transmitDescriptor() {
+	log("Entered descriptor function.");
+	for (unsigned int i = 0; i < sizeof(desc); i++) {
+		digitalWrite(LASER, HIGH);
+		for (int j = 0; j < 8; j++) {
+			delay(DESC_BIT_DURATION);
+			if ((*((char*)&desc + i) >> j) & BIT_MASK) {				// TODO: This can technically be optimized, but will you do it?
+				digitalWrite(LASER, HIGH);
+				continue;
+			}
+			digitalWrite(LASER, LOW);
+		}
+		delay(DESC_BIT_DURATION);
+		digitalWrite(LASER, LOW);
+		// Give the other device enough time to prepare for synchronization.
+		delay(DESC_BIT_DURATION);
+		delay(DESC_BIT_DURATION);
+	}
 }
+
+void sync() {
+        digitalWrite(LASER, LOW);
+        sleep();
+        digitalWrite(LASER, HIGH);
+        sleep();
+}
+
+#define BUFFER_SIZE 1024
+
+int16_t syncCounter = -1;
 
 void transmit(char* data, int length) {
-	// Send the data over the laser to the recieving device.
-	digitalWrite(LASER, HIGH);
-	log("Set high for com start.");
-	SLEEP;
-	for (int i = 0; i < length; i++) {
-		if (syncCounter == SYNC_POINT) {
-			synchronize();
+	printf("Length gotten: %d\n", length);
+	int ni = BUFFER_SIZE;
+	uint16_t amount;
+	for (int i = 0; i < length; i = ni, ni += BUFFER_SIZE) {
+		if (ni > length) {
+			amount = length - i;
+		} else {
+			amount = BUFFER_SIZE;
 		}
-		else {					// TODO: Change the format so the else is on the line above. It looks better, even though it isn't consistant with VS.
-			syncCounter++;
+// TODO: Make sure the buffer doesn't overflow on the arduino because of this length transmit here.
+		// Send the length of the next packet.
+		printf("Length of next packet: %d\n", amount);
+		sync();
+
+		for (int bit = 0; bit < 16; bit++) {
+			digitalWrite(LASER, (amount >> bit) & BIT_MASK);
+			sleep();		// TODO: Make all other parts that are like this be like this. This is a step up from what you were doing before.
 		}
-		sendByte(data[i]);
-		log("Sent a byte of data.");
+
+		// Send the packet.
+		for (int byte = 0; byte < amount; byte++) {
+			// Synchronize if the time is right.
+			if (syncCounter == desc.syncInterval) {
+				sync();
+				syncCounter = 0;
+			} else { syncCounter++; }
+
+			// Send the next byte.
+			for (int bit = 0; bit < 8; bit++) {
+				if ((data[byte] >> bit) & BIT_MASK) {		// TODO: This is technically inefficient. Do you want to fix this?
+					digitalWrite(LASER, HIGH);
+					sleep();
+					continue;
+				}
+				digitalWrite(LASER, LOW);
+				sleep();
+			}
+		}
 	}
-	log("Done sending the data. Setting back to low.");
-	// Reset the laser pin back to low so we don't trigger another receive on the Arduino.
-	digitalWrite(LASER, LOW);
 }
 
 void press() {
@@ -107,10 +148,19 @@ void press() {
 	log("Could not open the image file.");
 }
 
+
 int main() {
 	// Setup.
 	wiringPiSetup();
 	pinMode(LASER, OUTPUT);
+
+	desc.syncInterval = 1;
+	desc.bitDuration = 100;
+	desc.durationType = false;			// false = milliseconds, true = microseconds. TODO: Make defines for this.
+
+	transmitDescriptor();
+
+	log("Transmitted descriptor.");
 
 	bool buttonState = false;
 	while (true) {
