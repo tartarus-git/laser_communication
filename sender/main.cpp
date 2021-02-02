@@ -62,13 +62,16 @@ void transmitDescriptor() {
 		delay(DESC_BIT_DURATION);
 		delay(DESC_BIT_DURATION);
 	}
+
+	printf("Got past transmitting the descriptor.\n");
 }
 
 void sync() {
         digitalWrite(LASER, LOW);
         sleep();
         digitalWrite(LASER, HIGH);
-        sleep();
+        printf("Just set the thing high.\n");
+	sleep();
 }
 
 #define BUFFER_SIZE 1024
@@ -90,10 +93,27 @@ void transmit(char* data, int length) {
 		printf("Length of next packet: %d\n", amount);
 		sync();
 
+		printf("Starting with the sending thing.\n");
+
+		// TODO: Temporary debugging setup thing here. Obviously remove this eventually.
+		bool values[16];
+
 		for (int bit = 0; bit < 16; bit++) {
-			digitalWrite(LASER, (amount >> bit) & BIT_MASK);
-			sleep();		// TODO: Make all other parts that are like this be like this. This is a step up from what you were doing before.
+			bool thing = (amount >> bit) & BIT_MASK;
+			values[bit] = thing;
+			digitalWrite(LASER, thing);
+			sleep();
 		}
+
+		printf("Length in bits:\n");
+		for (int thingi = 0; thingi < 16; thingi++) {
+			if (values[thingi]) {
+				printf("1");
+				continue;
+			}
+			printf("0");
+		}
+		printf("\n");
 
 		// Send the packet.
 		for (int byte = 0; byte < amount; byte++) {
@@ -155,7 +175,7 @@ int main() {
 	pinMode(LASER, OUTPUT);
 
 	desc.syncInterval = 1;
-	desc.bitDuration = 100;
+	desc.bitDuration = 1000;
 	desc.durationType = false;			// false = milliseconds, true = microseconds. TODO: Make defines for this.
 
 	transmitDescriptor();
