@@ -28,6 +28,7 @@ void log(const char* message) {
 
 #define DESC_BIT_DURATION 100		// milliseconds.
 
+#pragma pack(1)				// TODO: Figure out why the hell this fixes a bug and makes this work (which it does). It shouldn't do anything should it?
 struct ConnectionDescriptor {
 	int16_t syncInterval;         // The amount of bytes between each synchronization plus 1.
 	uint16_t bitDuration;
@@ -36,7 +37,8 @@ struct ConnectionDescriptor {
 
 void sleep() {
 	if (desc.durationType) {
-		std::this_thread::sleep_for(std::chrono::microseconds(desc.bitDuration));		// TODO: Is this the proper way to do this?
+		//std::this_thread::sleep_for(std::chrono::microseconds(desc.bitDuration));		// TODO: Is this the proper way to do this?
+		delayMicroseconds(desc.bitDuration);
 		return;
 	}
 	delay(desc.bitDuration);
@@ -45,7 +47,6 @@ void sleep() {
 #define BIT_MASK 0x01
 
 void transmitDescriptor() {
-	log("Entered descriptor function.");
 	for (unsigned int i = 0; i < sizeof(desc); i++) {
 		digitalWrite(LASER, HIGH);
 		for (int j = 0; j < 8; j++) {
@@ -62,78 +63,65 @@ void transmitDescriptor() {
 		delay(DESC_BIT_DURATION);
 		delay(DESC_BIT_DURATION);
 	}
-
-	printf("Got past transmitting the descriptor.\n");
 }
 
 void sync() {
         digitalWrite(LASER, LOW);
         sleep();
         digitalWrite(LASER, HIGH);
-        printf("Just set the thing high.\n");
 	sleep();
 }
+
+#define SERIAL_DELAY 1000		// In milliseconds.
 
 #define BUFFER_SIZE 1024
 
 int16_t syncCounter = -1;
 
 void transmit(char* data, int length) {
-	printf("Length gotten: %d\n", length);
 	int ni = BUFFER_SIZE;
-	uint16_t amount;
+	uint16_t amount;		// TODO: This amount thing could maybe use some work I think.
 	for (int i = 0; i < length; i = ni, ni += BUFFER_SIZE) {
 		if (ni > length) {
 			amount = length - i;
 		} else {
 			amount = BUFFER_SIZE;
 		}
-// TODO: Make sure the buffer doesn't overflow on the arduino because of this length transmit here.
-		// Send the length of the next packet.
-		printf("Length of next packet: %d\n", amount);
+		std::cout << amount << std::endl;
+
 		sync();
 
-		printf("Starting with the sending thing.\n");
-
-		// TODO: Temporary debugging setup thing here. Obviously remove this eventually.
-		bool values[16];
-
+		// Send length of the next packet.
 		for (int bit = 0; bit < 16; bit++) {
-			bool thing = (amount >> bit) & BIT_MASK;
-			values[bit] = thing;
-			digitalWrite(LASER, thing);
+			digitalWrite(LASER, (amount >> bit) & BIT_MASK);
 			sleep();
 		}
 
-		printf("Length in bits:\n");
-		for (int thingi = 0; thingi < 16; thingi++) {
-			if (values[thingi]) {
-				printf("1");
-				continue;
-			}
-			printf("0");
-		}
-		printf("\n");
+		delay(1000);
+		sync();
 
 		// Send the packet.
 		for (int byte = 0; byte < amount; byte++) {
 			// Synchronize if the time is right.
 			if (syncCounter == desc.syncInterval) {
-				sync();
 				syncCounter = 0;
+				//sleep();		// This is to make sure that the receiver has enough time to start waiting for synchronization.
+				delayMicroseconds(3000);		// TODO: Make an oscilloscope and measure the delays on arduino and pi.
+				sync();
 			} else { syncCounter++; }
 
 			// Send the next byte.
 			for (int bit = 0; bit < 8; bit++) {
-				if ((data[byte] >> bit) & BIT_MASK) {		// TODO: This is technically inefficient. Do you want to fix this?
-					digitalWrite(LASER, HIGH);
-					sleep();
-					continue;
-				}
-				digitalWrite(LASER, LOW);
+				digitalWrite(LASER, (data[i + byte] >> bit) & BIT_MASK);
 				sleep();
 			}
 		}
+
+		syncCounter = -1;
+
+
+		// Give the relay enough time to send the captured data to the receiver over serial.
+		delay(SERIAL_DELAY);
 	}
 }
 
@@ -156,10 +144,6 @@ void press() {
 		}
 		f.close();
 
-		char* test = buffer.get();
-		printf("Width gotten: %d\n", *(int*)test);
-		printf("Height gotten: %d\n", *(int*)(test + 4));
-
 		log("Sending data over laser...");
 		transmit(buffer.get(), length);		// TODO: This get() here is okay right? If some sort of exception occurs, were safe, even in the other function right?
 
@@ -172,11 +156,14 @@ void press() {
 int main() {
 	// Setup.
 	wiringPiSetup();
+	piHiPri(99);					// Set the priority of this thread to the highest possible. This makes timing better. Only works with sudo.
 	pinMode(LASER, OUTPUT);
 
-	desc.syncInterval = 1;
+	desc.syncInterval = 0;
 	desc.bitDuration = 1000;
-	desc.durationType = false;			// false = milliseconds, true = microseconds. TODO: Make defines for this.
+	desc.durationType = true;			// false = milliseconds, true = microseconds. TODO: Make defines for this.
+
+	log("Transmitting descriptor...");
 
 	transmitDescriptor();
 
