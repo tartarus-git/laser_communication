@@ -50,6 +50,10 @@ namespace SerialReciever
             {
                 BytesRead = Serial.Read(buffer, pos, buffer.Length - pos);
                 pos += BytesRead;
+                Picture.Image = null;
+                BitmapData bmpData2 = bmp.LockBits(bounds, ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+                Marshal.Copy(buffer, pos - BytesRead, bmpData2.Scan0 + pos - BytesRead, BytesRead);
+                bmp.UnlockBits(bmpData2);
                 if (pos == buffer.Length)
                 {
                     Console.WriteLine("Finished receiving data and now showing bitmap.");
@@ -58,6 +62,7 @@ namespace SerialReciever
                     bmp.UnlockBits(bmpData);
                     pos = 0;
                 }
+                Picture.Image = bmp;
                 return;
             }
 
@@ -73,16 +78,16 @@ namespace SerialReciever
                 {
                     fixed (byte* ptr = DimBuf)
                     {
-                        int width = *(int*)ptr;
-                        int height = *(int*)(ptr + 4);
+                        uint width = *(uint*)ptr;
+                        uint height = *(uint*)(ptr + 4);
                         Console.WriteLine("Dimensions: " + width + ", " + height);
                         buffer = new byte[width * 4 * height];
                         // Create a new bitmap if the dimensions from before aren't valid anymore or it doesn't exist.
                         if (bmp == null || bmp.Width != width || bmp.Height != height)
                         {
-                            bmp = new Bitmap(width, height);
-                            bounds.Width = width;
-                            bounds.Height = height;
+                            bmp = new Bitmap((int)width, (int)height);
+                            bounds.Width = (int)width;
+                            bounds.Height = (int)height;
                         }
                     }
                 }
