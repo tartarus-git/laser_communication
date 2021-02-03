@@ -19,7 +19,9 @@ struct ConnectionDescriptor {
 
 void sleep() {
   if (desc.durationType) {
-    delayMicroseconds(desc.bitDuration);
+    delayMicroseconds(desc.bitDuration - 100);      // This is to account for analogReads, which take 100 microseconds.
+                                                    // Obviously this means you can't use this for anything else except analogReads.
+                                                    // BTW: You can totally make analogRead faster, so don't worry about this too much.
     return;
   }
   delay(desc.bitDuration);
