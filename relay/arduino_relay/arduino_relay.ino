@@ -1,73 +1,126 @@
 // Pins.
 #define PHOTORESISTOR A0
+#define CLEARANCE 10
 
 // Serial.
-#define BAUD_RATE 9600
-
-// Laser.
-#define TRANSMISSION_INTERVAL 100 // In microseconds.
-#define RECEIVE_OFFSET 10 // In microseconds.
-#define SYNC_POINT 100
-
-#define CLEARANCE 10
+#define BAUD_RATE 115200
 #define BUFFER_SIZE 1024
 
+// Laser.
 short baseline;
 
+#define DESC_BIT_DURATION 100    // milliseconds.      // TODO: Reduce the duration and try to maintain a stable communication.
+
+struct ConnectionDescriptor {
+  int16_t syncInterval;         // The amount of bytes between each synchronization plus 1.
+  uint16_t bitDuration;
+  uint8_t durationType;
+} desc;
+
+void sleep() {
+  if (desc.durationType) {
+    delayMicroseconds(desc.bitDuration - 100);      // This is to account for analogReads, which take 100 microseconds.
+                                                    // Obviously this means you can't use this for anything else except analogReads.
+                                                    // BTW: You can totally make analogRead faster, so don't worry about this too much.
+    return;
+  }
+  delay(desc.bitDuration);
+}
+
+int16_t syncCounter = -1;
+
+void sync() {
+  while (analogRead(PHOTORESISTOR) > baseline) { }
+  while (analogRead(PHOTORESISTOR) <= baseline) { }
+  sleep();
+  //delayMicroseconds(desc.bitDuration / 2);
+}
+
 void setup() {
+  pinMode(13, OUTPUT);
+  
   // Initialize serial.
   Serial.begin(BAUD_RATE);
 
-  // Pins are inputs by default, so no need for pinMode() here.
+  // Wait for initialization. This is because the serial-to-usb chip is async. This isn't necessary for serial pins.
+  while (!Serial) { }
 
   // Set the baseline brightness to the environmental brightness plus the clearance.
   baseline = analogRead(PHOTORESISTOR) + CLEARANCE;
-}
 
-short syncCounter = 0;
-
-short pos = 0;
-char charPos = 0;
-char buffer[BUFFER_SIZE];
-
-void sendBuffer() {
-  // Send the buffer to computer over serial.
-  Serial.write(buffer, pos);
-}
-
-void incrementPos() {   // TODO: You have to calculate the length of the transmission somewhere, because or else you're not going to know when to send the buffer.
-  if (charPos == 7) {
-      charPos = 0;
-      pos++;
-      if (pos == BUFFER_SIZE) {
-        sendBuffer();
-        pos = 0;
-      }
-    }
-    charPos++;
-}
-
-void loop() {
-  if (analogRead(PHOTORESISTOR) > baseline) {      // TODO: Use a non-sleep-reliant method to transfer metadata about the connection before attempting the high-speed transfer.
-    delayMicroseconds(RECEIVE_OFFSET); // TODO: This probably doesn't do anything because the arduino can't time travel. This probably makes it worse.
-    while (true) {
-      delayMicroseconds(TRANSMISSION_INTERVAL);
+  // Receive the connection descriptor.
+  for (int i = 0; i < sizeof(desc); i++) {
+    while (analogRead(PHOTORESISTOR) <= baseline) { }
+    for (int j = 0; j < 8; j++) {
+      delay(DESC_BIT_DURATION);
       if (analogRead(PHOTORESISTOR) > baseline) {
-        buffer[pos] |= 1 << charPos;            // TODO: See if it's possible to use HIGH here instead of one for more intent and such.
-        incrementPos();
+        *((char*)&desc + i) |= HIGH << j;
         continue;
       }
-      incrementPos();
-      if (syncCounter == SYNC_POINT) {
-        syncCounter = 0;
-        while (true) {
-          if (analogRead(PHOTORESISTOR) > baseline) { break; }
-        }
-        delayMicroseconds(TRANSMISSION_INTERVAL);       // TODO: Add some offset define so that this isn't too close to the edge of a value.
-                                                        // Of course, only if it's a problem.
-        continue;
-      }
-      syncCounter++;
+      *((char*)&desc + i) &= ~(HIGH << j);      // TODO: Is there any better way to do this?
     }
+    // Give the other device enough time to set up a synchronization point.
+    delay(DESC_BIT_DURATION);
+    delay(DESC_BIT_DURATION);
+  }
+
+  char buffer[BUFFER_SIZE];
+
+  bool ledState = false;
+  
+  while (true) {
+    sync();
+
+    // Receive the length of the upcoming data transmission.
+    uint16_t length;      // TODO: No sync here right? It only is possible once actually sending data right?
+    for (uint16_t i = 0; i < 16; i++) {
+      if (analogRead(PHOTORESISTOR) > baseline) {
+        length |= HIGH << i;
+        sleep();
+        continue;
+      }
+      length &= ~(HIGH << i);
+      sleep();
+    }
+
+    //Serial.println(length);
+    //Serial.flush();
+    if (length == BUFFER_SIZE) {
+      digitalWrite(13, ledState = !ledState);
+    }
+
+    // Temp:
+    sync();
+
+    // Receive the data.
+    for (int i = 0; i < length; i++) {
+      // Synchronize if the time is right.
+      if (syncCounter == desc.syncInterval) {
+        syncCounter = 0;
+        sync();
+      } else { syncCounter++; }
+
+      // Receive the next bit.
+      for (int j = 0; j < 8; j++) {
+        if (analogRead(PHOTORESISTOR) > baseline) {
+          buffer[i] |= HIGH << j;
+          sleep();
+          continue;
+        }
+        buffer[i] &= ~(HIGH << j);
+        sleep();          // TODO: See if you can make this not happen on the last loop to save time for serial stuff.
+      }
+    }
+
+    // Reset syncCounter.
+    syncCounter = -1;
+
+    // TODO: Eventually you're gonna need to put in some extra time at the end of each packet for the serial sending stuff.
+
+    // Output the buffer to serial.
+    Serial.write(buffer, length);
+    Serial.flush();     // TODO: Do I actually need this here. Figure this stuff out.
   }
 }
+
+void loop() { }
