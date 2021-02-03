@@ -38,7 +38,7 @@ struct ConnectionDescriptor {
 void sleep() {
 	if (desc.durationType) {
 		//std::this_thread::sleep_for(std::chrono::microseconds(desc.bitDuration));		// TODO: Is this the proper way to do this?
-		delayMicroseconds(desc.bitDuration);
+		delayMicroseconds(desc.bitDuration - 260);		// This is just an adjustment because of the inaccuracy of sleepMicroseconds. Very weird, but it works.
 		return;
 	}
 	delay(desc.bitDuration);
@@ -97,7 +97,7 @@ void transmit(char* data, int length) {
 			sleep();
 		}
 
-		delay(1000);
+		sleep();
 		sync();
 
 		// Send the packet.
@@ -105,8 +105,8 @@ void transmit(char* data, int length) {
 			// Synchronize if the time is right.
 			if (syncCounter == desc.syncInterval) {
 				syncCounter = 0;
-				//sleep();		// This is to make sure that the receiver has enough time to start waiting for synchronization.
-				delayMicroseconds(3000);		// TODO: Make an oscilloscope and measure the delays on arduino and pi.
+				sleep();		// This is to make sure that the receiver has enough time to start waiting for synchronization.
+				//delay()
 				sync();
 			} else { syncCounter++; }
 
@@ -159,9 +159,9 @@ int main() {
 	piHiPri(99);					// Set the priority of this thread to the highest possible. This makes timing better. Only works with sudo.
 	pinMode(LASER, OUTPUT);
 
-	desc.syncInterval = 0;
-	desc.bitDuration = 1000;
-	desc.durationType = true;			// false = milliseconds, true = microseconds. TODO: Make defines for this.
+	desc.syncInterval = 1;
+	desc.bitDuration = 1;			// In the current state, this needs to be at least 260 for it to work.
+	desc.durationType = false;			// false = milliseconds, true = microseconds. TODO: Make defines for this.
 
 	log("Transmitting descriptor...");
 
