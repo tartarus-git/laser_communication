@@ -62,13 +62,13 @@ namespace SerialReciever
 
         static void thing()
         {
-            BitmapData bmpData2 = bmp.LockBits(bounds, ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+            BitmapData bmpData2 = bmp.LockBits(bounds, ImageLockMode.WriteOnly, PixelFormat.Format1bppIndexed);
             Marshal.Copy(buffer, pos - BytesRead, bmpData2.Scan0 + pos - BytesRead, BytesRead);
             bmp.UnlockBits(bmpData2);
             if (pos == buffer.Length)
             {
                 Console.WriteLine("Finished receiving data and now showing bitmap.");
-                BitmapData bmpData = bmp.LockBits(bounds, ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+                BitmapData bmpData = bmp.LockBits(bounds, ImageLockMode.WriteOnly, PixelFormat.Format1bppIndexed);
                 Marshal.Copy(buffer, 0, bmpData.Scan0, buffer.Length);
                 bmp.UnlockBits(bmpData);
                 pos = 0;
