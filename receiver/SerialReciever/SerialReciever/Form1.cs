@@ -2,6 +2,7 @@
 using System.Windows.Forms;
 using System.IO.Ports;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -16,31 +17,72 @@ namespace SerialReciever
             InitializeComponent();
         }
 
-        static bool isAlive = true;
-
-        static int pos = 0;
+        // Create a derived class from PictureBox so that we can change how the picture box renders the image.
+        class CrispPictureBox : PictureBox
+        {
+            protected override void OnPaint(PaintEventArgs pe)
+            {
+                // This stuff makes it so that the pixels don't get blurred. Instead, they are very crisp, hence the class name.
+                pe.Graphics.InterpolationMode = InterpolationMode.NearestNeighbor;
+                pe.Graphics.PixelOffsetMode = PixelOffsetMode.Half;
+                base.OnPaint(pe);
+            }
+        }
 
         // TODO: Make the COM thing variable to avoid presentation mess-ups.
         static SerialPort Serial;
         // TODO: Check that this whole static thing is the best way to go. Is there a better way.
-        static PictureBox Picture;
+        static CrispPictureBox Picture;
 
-        static Bitmap bmp;
-        static Rectangle bounds;
-
+        static bool isAlive = true;
         Thread receiveThread;
+
+        Form prompt;
+
+        static byte[] dimBuf = new byte[8];
+        static byte[] buffer;
+        static int pos = 0;
+        static int BytesRead;
+
+        static Bitmap bmp = null;
+        static BitmapData bmpData;
+        static Rectangle bounds = Rectangle.Empty;
+
+        private void submitClicked(object sender, EventArgs e)
+        {
+            prompt.Close();
+        }
 
         private void Form1_Load(object sender, EventArgs e)
         {
-            Picture = pictureBox;
-            Serial = new SerialPort("COM3", 115200);
+            // Make the main PictureBox available from static functions.
+            Picture = (CrispPictureBox)pictureBox;
+            Picture.Image = bmp;
+
+            // Show a prompt to get the com port from the user.
+            prompt = new Form();
+
+            TextBox input = new TextBox();
+            prompt.Controls.Add(input);
+
+            Button submit = new Button();
+            submit.Location = new Point(submit.Location.X, input.Size.Height);
+            submit.Text = "Submit";
+            submit.Click += submitClicked;
+            prompt.Controls.Add(submit);
+
+            prompt.ShowDialog();
+
+            // Open up a SerialPort for communication with the Arduino.
+            Serial = new SerialPort(input.Text, 115200);
             Serial.Open();
 
-            // Send some useless data just so I can see if the light on the Arduino lights up.
+            // Send some useless data so the receive LED on the Arduino blinks.
             Serial.Write(Encoding.ASCII.GetBytes("A"), 0, 1);
 
             Serial.DiscardInBuffer(); // This is necessary because there is still stuff left in there from the program upload to arduino or something. Really weird. Find out more about it if you can. TODO.
-
+            
+            // Start a new thread on which to receive data from the serial connection.
             receiveThread = new Thread(new ThreadStart(receive));
             receiveThread.Start();
 
@@ -53,76 +95,68 @@ namespace SerialReciever
             receiveThread.Join();
         }
 
-        static byte[] DimBuf = new byte[8];
-        static byte[] buffer;
-
-        static bool mode = false;
-
-        static int BytesRead = 0;
-
-        static void thing()
+        static void UpdateImage()
         {
-            BitmapData bmpData2 = bmp.LockBits(bounds, ImageLockMode.WriteOnly, PixelFormat.Format1bppIndexed);
-            Marshal.Copy(buffer, pos - BytesRead, bmpData2.Scan0 + pos - BytesRead, BytesRead);
-            bmp.UnlockBits(bmpData2);
-            if (pos == buffer.Length)
-            {
-                Console.WriteLine("Finished receiving data and now showing bitmap.");
-                BitmapData bmpData = bmp.LockBits(bounds, ImageLockMode.WriteOnly, PixelFormat.Format1bppIndexed);
-                Marshal.Copy(buffer, 0, bmpData.Scan0, buffer.Length);
-                bmp.UnlockBits(bmpData);
-                pos = 0;
-            }
+            // Add newly received chunk to the bitmap and display again so that you can see the image being built.
+            bmpData = bmp.LockBits(bounds, ImageLockMode.WriteOnly, PixelFormat.Format1bppIndexed);
+            Marshal.Copy(buffer, pos, bmpData.Scan0 + pos, BytesRead);
+            bmp.UnlockBits(bmpData);
         }
+
+        // TODO: I know you're confused because of c++, but use the uppercase naming scheme for C#, it looks better.
 
         static void receive()
         {
             while (isAlive)
             {
-                if (mode)
+                int length = 0;
+
+                // Start receiving image dimensions first.
+                while (isAlive)
                 {
-                    BytesRead = 0;
-                    BytesRead = Serial.Read(buffer, pos, buffer.Length - pos);
+                    BytesRead = Serial.Read(dimBuf, pos, 8 - pos);
                     pos += BytesRead;
-                    if (BytesRead != 0)
+                    if (pos == 8)
                     {
-                        Console.WriteLine("Received image data.");
-                        //Picture.Image = null;           // TODO: This probably isn't necessary.
-                        Picture.Invoke(new MethodInvoker(thing));
-                        Picture.Image = bmp;
-                    }
-                    continue;
-                }
-
-                // This message isn't really valid when it comes because of the loop and everything.
-                // Also Serial.Read blocks when nothing comes which is why it doesn't get spit out over and over.
-                Console.WriteLine("Recieved first bytes. Parsing dimensions of image...");
-
-                BytesRead = Serial.Read(DimBuf, pos, 8 - pos);
-                pos += BytesRead;
-
-                Console.WriteLine("New pos: " + pos);
-                if (pos == 8)
-                {
-                    unsafe
-                    {
-                        fixed (byte* ptr = DimBuf)
+                        Console.WriteLine("Received image dimensions.");
+                        unsafe
                         {
-                            uint width = *(uint*)ptr;
-                            uint height = *(uint*)(ptr + 4);
-                            Console.WriteLine("Dimensions: " + width + ", " + height);
-                            buffer = new byte[width * 4 * height];
-                            // Create a new bitmap if the dimensions from before aren't valid anymore or it doesn't exist.
-                            if (bmp == null || bmp.Width != width || bmp.Height != height)
+                            fixed (byte* ptr = dimBuf)
                             {
-                                bmp = new Bitmap((int)width, (int)height);
-                                bounds.Width = (int)width;
-                                bounds.Height = (int)height;
+                                int width = *(int*)ptr;
+                                int height = *(int*)(ptr + 4);
+                                Console.WriteLine("Dimensions: " + width + ", " + height);
+
+                                // Create buffer and bitmap and bounds for LockBits.
+                                length = width * height;
+                                buffer = new byte[length];
+                                bmp = new Bitmap(width, height);
+                                bounds = new Rectangle(0, 0, width, height);
+
+                                break;
                             }
                         }
                     }
-                    mode = true;
-                    pos = 0;
+                }
+
+                pos = 0;
+
+                // Start receiving actual image data.
+                while (isAlive)
+                {
+                    BytesRead = Serial.Read(buffer, pos, length - pos);
+
+                    // Invoke the image updater on the PictureBox thread (which is the main thread) because Bitmap isn't thread safe
+                    // and the picture box sometimes uses it when we're using it, which isn't good.
+                    // This will prevent that because it has to be done synchronously now.
+                    Picture.Invoke(new MethodInvoker(UpdateImage));
+
+                    pos += BytesRead;
+                    if (pos == length)
+                    {
+                        Console.WriteLine("Received the entire image. Ready to receive the next one.");
+                        break;
+                    }
                 }
             }
         }
