@@ -1,43 +1,33 @@
 // Pins.
 #define PHOTORESISTOR A0
 #define CLEARANCE 10
+#define STATUS 13                                   // Built-in status LED on the Arduino is on pin 13.
 
 // Serial.
 #define BAUD_RATE 115200
 #define BUFFER_SIZE 1024
 
 // Laser.
+#define DESC_BIT_DURATION 100                       // In milliseconds.
+#define SLEEP delay(desc.bitDuration)
+
 short baseline;
 
-#define DESC_BIT_DURATION 100    // milliseconds.      // TODO: Reduce the duration and try to maintain a stable communication.
-
 struct ConnectionDescriptor {
-  int16_t syncInterval;         // The amount of bytes between each synchronization plus 1.
-  uint16_t bitDuration;
-  uint8_t durationType;
+  int16_t syncInterval;                             // The amount of bytes between each synchronization plus 1.
+  uint16_t bitDuration;                             // In milliseconds.
 } desc;
-
-void sleep() {
-  if (desc.durationType) {
-    delayMicroseconds(desc.bitDuration - 100);      // This is to account for analogReads, which take 100 microseconds.
-                                                    // Obviously this means you can't use this for anything else except analogReads.
-                                                    // BTW: You can totally make analogRead faster, so don't worry about this too much.
-    return;
-  }
-  delay(desc.bitDuration);
-}
 
 int16_t syncCounter = -1;
 
 void sync() {
   while (analogRead(PHOTORESISTOR) > baseline) { }
   while (analogRead(PHOTORESISTOR) <= baseline) { }
-  sleep();
-  //delayMicroseconds(desc.bitDuration / 2);
+  SLEEP;
 }
 
 void setup() {
-  pinMode(13, OUTPUT);
+  pinMode(STATUS, OUTPUT);
   
   // Initialize serial.
   Serial.begin(BAUD_RATE);
@@ -72,28 +62,28 @@ void setup() {
     sync();
 
     // Receive the length of the upcoming data transmission.
-    uint16_t length;      // TODO: No sync here right? It only is possible once actually sending data right?
+    uint16_t length;
     for (uint16_t i = 0; i < 16; i++) {
       if (analogRead(PHOTORESISTOR) > baseline) {
         length |= HIGH << i;
-        sleep();
+        SLEEP;
         continue;
       }
       length &= ~(HIGH << i);
-      sleep();
+      SLEEP;
     }
 
-    //Serial.println(length);
-    //Serial.flush();
+    // Invert state of the status LED to show that the correct length was retrieved. This is just for debugging.
     if (length == BUFFER_SIZE) {
       digitalWrite(13, ledState = !ledState);
     }
 
-    // Temp:
+    // Synchronize again before attempting to receive data.
     sync();
 
-    // Receive the data.
-    for (int i = 0; i < length; i++) {
+    // Receive data.
+    uint16_t lastIndex = length - 1;
+    for (int i = 0; i < lastIndex; i++) {
       // Synchronize if the time is right.
       if (syncCounter == desc.syncInterval) {
         syncCounter = 0;
@@ -104,18 +94,35 @@ void setup() {
       for (int j = 0; j < 8; j++) {
         if (analogRead(PHOTORESISTOR) > baseline) {
           buffer[i] |= HIGH << j;
-          sleep();
+          SLEEP;
           continue;
         }
         buffer[i] &= ~(HIGH << j);
-        sleep();          // TODO: See if you can make this not happen on the last loop to save time for serial stuff.
+        SLEEP;
       }
     }
+    // The last round is done extra, just so we can avoid the SLEEP at the end without relying on function calls. This gives us more time to send the data the the receiver over serial.
+    // Synchronize if the time is right.
+    if (syncCounter == desc.syncInterval) {
+      syncCounter = 0;
+      sync();
+    } else { syncCounter++; }
+
+    // Reeive tbe next bit.
+    for (int j = 0; j < 7; j++) {
+      if (analogRead(PHOTORESISTOR) > baseline) {
+        buffer[length] |= HIGH << j;
+        SLEEP;
+        continue;
+      }
+      buffer[length] &= ~(HIGH << j);
+      SLEEP;
+    }
+    if (analogRead(PHOTORESISTOR) > baseline) { buffer[length] |= HIGH << j; }
+    else { buffer[length] &= ~(HIGH << j); }
 
     // Reset syncCounter.
     syncCounter = -1;
-
-    // TODO: Eventually you're gonna need to put in some extra time at the end of each packet for the serial sending stuff.
 
     // Output the buffer to serial.
     Serial.write(buffer, length);
