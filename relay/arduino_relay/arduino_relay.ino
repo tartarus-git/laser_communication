@@ -63,7 +63,7 @@ void setup() {
 
     // Receive the length of the upcoming data transmission.
     uint16_t length;
-    for (uint16_t i = 0; i < 16; i++) {
+    for (int i = 0; i < 16; i++) {
       if (analogRead(PHOTORESISTOR) > baseline) {
         length |= HIGH << i;
         SLEEP;
@@ -90,7 +90,7 @@ void setup() {
         sync();
       } else { syncCounter++; }
 
-      // Receive the next bit.
+      // Receive the next byte.
       for (int j = 0; j < 8; j++) {
         if (analogRead(PHOTORESISTOR) > baseline) {
           buffer[i] |= HIGH << j;
@@ -108,7 +108,7 @@ void setup() {
       sync();
     } else { syncCounter++; }
 
-    // Reeive tbe next bit.
+    // Reeive the next byte.
     for (int j = 0; j < 7; j++) {
       if (analogRead(PHOTORESISTOR) > baseline) {
         buffer[length] |= HIGH << j;
@@ -118,8 +118,8 @@ void setup() {
       buffer[length] &= ~(HIGH << j);
       SLEEP;
     }
-    if (analogRead(PHOTORESISTOR) > baseline) { buffer[length] |= HIGH << j; }
-    else { buffer[length] &= ~(HIGH << j); }
+    if (analogRead(PHOTORESISTOR) > baseline) { buffer[length] |= HIGH << 7; }
+    else { buffer[length] &= ~(HIGH << 7); }
 
     // Reset syncCounter.
     syncCounter = -1;

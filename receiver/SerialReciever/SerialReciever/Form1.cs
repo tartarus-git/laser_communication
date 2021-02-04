@@ -20,13 +20,13 @@ namespace SerialReciever
         // Create a derived class from PictureBox so that we can change how the picture box renders the image.
         class CrispPictureBox : PictureBox
         {
-            protected override void OnPaint(PaintEventArgs pe)
+            /*protected override void OnPaint(PaintEventArgs pe)
             {
                 // This stuff makes it so that the pixels don't get blurred. Instead, they are very crisp, hence the class name.
                 pe.Graphics.InterpolationMode = InterpolationMode.NearestNeighbor;
                 pe.Graphics.PixelOffsetMode = PixelOffsetMode.Half;
                 base.OnPaint(pe);
-            }
+            }*/
         }
 
         // TODO: Make the COM thing variable to avoid presentation mess-ups.
@@ -55,9 +55,12 @@ namespace SerialReciever
 
         private void Form1_Load(object sender, EventArgs e)
         {
-            // Make the main PictureBox available from static functions.
-            Picture = (CrispPictureBox)pictureBox;
-            Picture.Image = bmp;
+            // Create a crisp picture box and set the image to the bitmap.
+            Picture = new CrispPictureBox();
+            Picture.Size = ClientSize;
+            Picture.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            Picture.SizeMode = PictureBoxSizeMode.Zoom;
+            this.Controls.Add(Picture);
 
             // Show a prompt to get the com port from the user.
             prompt = new Form();
@@ -101,6 +104,7 @@ namespace SerialReciever
             bmpData = bmp.LockBits(bounds, ImageLockMode.WriteOnly, PixelFormat.Format1bppIndexed);
             Marshal.Copy(buffer, pos, bmpData.Scan0 + pos, BytesRead);
             bmp.UnlockBits(bmpData);
+            Picture.Image = bmp;
         }
 
         // TODO: I know you're confused because of c++, but use the uppercase naming scheme for C#, it looks better.
@@ -114,7 +118,7 @@ namespace SerialReciever
                 // Start receiving image dimensions first.
                 while (isAlive)
                 {
-                    BytesRead = Serial.Read(dimBuf, pos, 8 - pos);
+                    BytesRead = Serial.Read(dimBuf, pos, 8 - pos);              // TODO: Make this async so program doesn't freeze when the image is done.
                     pos += BytesRead;
                     if (pos == 8)
                     {
