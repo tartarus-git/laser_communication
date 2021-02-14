@@ -1,4 +1,9 @@
-#include <opencv2/opencv.hpp>			// TODO: This include seems strange, figure out if you can be more precise here.
+//#include <opencv2/opencv.hpp>			// TODO: This include seems strange, figure out if you can be more precise here.
+
+#include <opencv2/core.hpp>
+#include <opencv2/videoio.hpp>
+#include <opencv2/imgproc.hpp>
+
 #include <wiringPi.h>
 #include <memory>
 #include <cstring>
@@ -114,7 +119,7 @@ cv::VideoCapture cap;
 
 void press() {
 	// Load raw image data from file (not the actual RAW format).
-	/*std::ifstream f("input.raw", std::ios::binary | std::ios::ate);
+/*	std::ifstream f("input.raw", std::ios::binary | std::ios::ate);
 	if (f.is_open()) {
 		log("Sucessfully opened the image file. Loading contents...");
 		int length = f.tellg();
@@ -144,25 +149,54 @@ void press() {
 	log("Sucessfully captured image. Resizing...");
 	cv::Mat resized;
 	cv::resize(image, resized, cv::Size(200, 100));
+
+
+	int thing = 200 * 3 * 100;
+	for (int i = 0; i < thing; i++) {
+		if (i % 20 > 10) {
+			resized.data[i] = 255;
+		} else {
+			resized.data[i] = 255;
+		}
+		resized.data[i] = 0;
+	}
+
+
+	std::ofstream thingf("debug_output", std::ios::binary);
+	if (thingf.is_open()) {
+		thingf.write((const char*)resized.data, thing);			// TODO: Cast from uchar to char? Wtf is a uchar?
+	}
+	thingf.close();
+
+
 	log("Resized. Converting to 1bpp...");
-	int length = 200 * 100 / 8;
-	if ((200 * 100) % 8) { length++; }
-	length += 8;
+	int stride = 200 / 8;
+	if (200 % 8) { stride++; }
+	int length = stride * 100;
+	printf("%d", length);
 	std::unique_ptr<char[]> buffer = std::make_unique<char[]>(length);
 	int matIndex = 0;
-	for (int i = 8; i < length; i++) {
-		for (int j = 7; j >= 0; j--, matIndex += 3) {
+	for (int i = 0; i < 100; i++) {
+		for (int j = 0; j < 200; j++) {
 			char avg = (resized.data[matIndex] + resized.data[matIndex + 1] + resized.data[matIndex + 2]) / 3;
+			matIndex += 3;
 			if (avg > 127) {
-				buffer[i] |= 1 << j;
-				continue;
+				buffer[i * stride + 200 / 8 + 8] |= 1 << (200 % 8);
+				continue;			// The + 8 on the end of the buffer thing is for the header with the dims.
 			}
-			buffer[i] &= ~(1 << j);
+			buffer[i * stride + 200 / 8 + 8] &= ~(1 << (200 % 8));
 		}
 	}
 	log("Converted. Adding dimension tag to the buffer...");
 	*(int32_t*)buffer.get() = 200;
 	*(int32_t*)(buffer.get() + 4) = 100;
+	for (int i = 0; i < 8; i++) {
+		for (int j = 0; j < 8; j++) {
+			if ((buffer[i] >> j) & 0x01) { printf("%d", 1); }
+			else { printf("%d", 0); }
+		}
+	}
+	log("");
 	log("Added. Sending data over laser...");
 	transmit(buffer.get(), length);
 }
@@ -183,7 +217,7 @@ int main() {
 
 	// Describe a few things about the connection.
 	desc.syncInterval = 1;
-	desc.bitDuration = 1;
+	desc.bitDuration = 2;
 
 	log("Transmitting descriptor...");
 
