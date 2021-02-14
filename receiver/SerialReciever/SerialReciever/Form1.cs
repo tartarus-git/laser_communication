@@ -132,7 +132,7 @@ namespace SerialReciever
                                 Console.WriteLine("Dimensions: " + width + ", " + height);
 
                                 // Create buffer and bitmap and bounds for LockBits.
-                                length = width * height;
+                                length = width * height;            // TODO: This obviously isn't right if we're using 1bpp. Fix this.
                                 buffer = new byte[length];
                                 bmp = new Bitmap(width, height);
                                 bounds = new Rectangle(0, 0, width, height);
@@ -156,7 +156,7 @@ namespace SerialReciever
                     Picture.Invoke(new MethodInvoker(UpdateImage));
 
                     pos += BytesRead;
-                    if (pos == length)
+                    if (pos == length)                  // TODO: This obviously won't work with 1bpp.
                     {
                         Console.WriteLine("Received the entire image. Ready to receive the next one.");
                         break;
