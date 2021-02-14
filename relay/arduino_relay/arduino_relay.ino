@@ -9,22 +9,36 @@
 
 // Laser.
 #define DESC_BIT_DURATION 100                       // In milliseconds.
-#define SLEEP delay(desc.bitDuration)
+
+#define MICROSECONDS true
+#define MILLISECONDS false
 
 short baseline;
 
 struct ConnectionDescriptor {
+  uint32_t transmissionLength;                      // The length of the entire following transmission.
   int16_t syncInterval;                             // The amount of bytes between each synchronization plus 1.
-  uint16_t bitDuration;                             // In milliseconds.
+  uint16_t bitDuration;
+  uint8_t durationType;                             // True for microseconds, false for milliseconds.
 } desc;
 
-int16_t syncCounter = -1;
+void sleep() {
+  if (desc.durationType == MICROSECONDS) {
+    delayMicroseconds(desc.bitDuration);
+    return;
+  }
+  delay(desc.bitDuration);        // TODO: This was just a work-around from the start anyway, can I use 1 number for the delay?
+}
+
+#define SLEEP sleep()
 
 void sync() {
   while (analogRead(PHOTORESISTOR) > baseline) { }
   while (analogRead(PHOTORESISTOR) <= baseline) { }
   SLEEP;
 }
+
+int16_t syncCounter = -1;
 
 void setup() {
   pinMode(STATUS, OUTPUT);
@@ -34,6 +48,8 @@ void setup() {
 
   // Wait for initialization. This is because the serial-to-usb chip is async. This isn't necessary for serial pins.
   while (!Serial) { }
+
+  // TODO: Make the connection descriptor a reoccuring send. This will avoid having to restart over and over all the time.
 
   // Set the baseline brightness to the environmental brightness plus the clearance.
   baseline = analogRead(PHOTORESISTOR) + CLEARANCE;
@@ -101,7 +117,7 @@ void setup() {
         SLEEP;
       }
     }
-    // The last round is done extra, just so we can avoid the SLEEP at the end without relying on function calls. This gives us more time to send the data the the receiver over serial.
+    // Last round extra to avoid unnecessary SLEEP at the end.
     // Synchronize if the time is right.
     if (syncCounter == desc.syncInterval) {
       syncCounter = 0;
