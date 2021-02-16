@@ -1,3 +1,5 @@
+#include <Wire.h>                                           // Needed for I2C communication.
+
 // Pins.
 #define LASER A0
 
@@ -52,57 +54,90 @@ void sync() {
 
 int16_t syncCounter = -1;
 
-void transmit(const char* data) {
-  uint16_t packetLength;
-  int ni = BUFFER_SIZE;
-  for (int i = 0; i < desc.transmissionLength; i = ni; ni += BUFFER_SIZE) {
-    if (ni > desc.transmissionLength) { packetLength = desc.transmissionLength - i; }
-    else { packetLength = BUFFER_SIZE; }
+void transmit(const char* data, int amount) {
+  sync();
 
-    sync();
+  // Send length of next packet.
+  for (int bit = 0; bit < 16; bit++) {
+    digitalWrite(LASER, (packetLength >> bit) & BIT_MASK);
+    SLEEP;
+  }
 
-    // Send length of next packet.
-    for (int bit = 0; bit < 16; bit++) {
-      digitalWrite(LASER, (packetLength >> bit) & BIT_MASK);
+  SLEEP;
+  sync();
+
+  // Send the packet.
+  for (int bytePos = 0; bytePos < amount; bytePos++) {
+    // Synchronize if the time is right.
+    if (syncCounter == desc.syncInterval) {
+      syncCounter = 0;
+      SLEEP;                    // Sleep to give the other Arduino enough time.
+      sync();
+    } else { syncCounter++; }
+
+    // Send the next byte.
+    for (int bitPos = 0; bitPos < 8; bitPos++) {
+      digitalWrite(LASER, (data[i + bytePos] >> bitPos) & BIT_MASK);
       SLEEP;
     }
 
-    SLEEP;                        // Sleep so that the other Arduino has enough time to start waiting for synchronization.
-    sync();
+    // Reset sync counter;
+    syncCounter = -1;
 
-    // Send the packet.
-    for (int bytePos = 0; bytePs < packetLength; bytePos++) {
-      // Synchronize if the time is right.
-      if (syncCounter == desc.syncInterval) {
-        syncCounter = 0;
-        SLEEP;                    // Sleep to give the other Arduino enough time.
-        sync();
-      } else { syncCounter++; }
+    // Give the relay enough time to send the captured data to the receiver over serial.
+    delay(SERIAL_DELAY);
+  }
+}
 
-      // Send the next byte.
-      for (int bitPos = 0; bitPos < 8; bitPos++) {
-        digitalWrite(LASER, (data[i + bytePos] >> bitPos) & BIT_MASK);
-        SLEEP;
+char buffer[BUFFER_SIZE];
+
+int transmissionPos = 0;
+int pos = 0;
+bool recDesc = true;
+void I2CReceive(int amount) {
+  if (recDesc) {
+receiveDescriptor:
+    while (Wire.available()) {
+      if (pos == sizeof(desc) - 1) {
+        transmitDescriptor();                           // Send descriptor over laser.
+        
+        pos = 0;                                        // Prepare for receiving the transmission.
+        recTransmission = false;
+        goto receiveTransmission;                       // Go receive the transmission.
       }
-
-      // Reset sync counter;
-      syncCounter = -1;
-
-      // Give the relay enough time to send the captured data to the receiver over serial.
-      delay(SERIAL_DELAY);
+      ((char*)desc)[pos] = Wire.read();
+      pos++;
+    }
+    return;
+  }
+  
+receiveTransmission:
+  while (Wire.available()) {
+    buffer[pos] = Wire.read();
+    pos++;
+    transmissionPos++;
+    if (transmissionPos == desc.transmissionLength) {
+      transmit(buffer, pos);                                    // Transmit last, potentially incomplete packet.
+      
+      pos = 0;                                                  // Prepare for receiving descriptor.
+      transmissionPos = 0;
+      recDesc = true;
+      goto receiveDescriptor;
+    }
+    if (pos == BUFFER_SIZE) {
+      transmit(buffer, pos);                                    // Send packet over laser.
+      pos = 0;                                                  // Prepare for the next packet over I2C.
     }
   }
 }
 
 void setup() {
+  // I2C setup.
+  Wire.begin(0);
+  Wire.onReceive(I2CReceive);
+
+  // Laser setup.
   pinMode(LASER, OUTPUT);
-
-  // Set up the values for the connection descriptor.
-  desc.syncInterval = 1;
-  desc.bitDuration = 1;
-  desc.durationType = MILLISECONDS;
 }
 
-void loop() {
-  // TODO: Wait for input from I2C connection to raspi. Then set the transmission length and start sending. When done, repeat.
-}
+void loop() { }
