@@ -26,6 +26,12 @@
 // Button.
 #define BUTTON 0				// TODO: Give this an actual pin.
 
+// Laser.
+#define BUFFER_SIZE 1024
+
+#define MILLISECONDS false
+#define MICROSECONDS true
+
 // Loop.
 #define LOOP_SLEEP 10							// To make sure that we don't use too much of the processor for nothing.
 
@@ -60,6 +66,18 @@ struct ConnectionDescriptor {
 
 int I2CFile;
 
+void writeThroughChunks(char* buffer, int length) {
+	int ni = 32;
+	for (int i = 0; i < length; i = ni, ni += 32) {
+		if (ni > length) {
+			write(I2CFile, buffer + i, length - i);
+			break;
+		}
+		write(I2CFile, buffer + i, 32);
+		delay(10);
+	}
+}
+
 int main() {
 	// Open I2C connection to the Arduino converter.
 	if ((I2CFile = open("/dev/i2c-1", O_WRONLY)) == -1) {
@@ -84,6 +102,13 @@ int main() {
 		return 0;
 	}
 
+	// Connection descriptor setup.
+	desc.transmissionLength = IMAGE_SIZE;
+	printf("%d\n", IMAGE_SIZE);
+	desc.syncInterval = 1;
+	desc.bitDuration = 10;
+	desc.durationType = MICROSECONDS;
+
 	// Enter loop and wait for someone to press button.
 	while (true) {
 		delay(LOOP_SLEEP);
@@ -91,8 +116,16 @@ int main() {
 			shoot();
 			log("Sending the image over I2C...");
 			write(I2CFile, &desc, sizeof(desc));
-			delay(1000);
-			write(I2CFile, image.data, IMAGE_SIZE);
+			int ni = BUFFER_SIZE;
+			for (int i = 0; i < IMAGE_SIZE; i = ni, ni += BUFFER_SIZE) {
+				delay(1000);
+				log("Chunk done.");
+				if (ni > IMAGE_SIZE) {
+					writeThroughChunks((char*)image.data + i, IMAGE_SIZE - i);
+					break;
+				}
+				writeThroughChunks((char*)image.data + i, BUFFER_SIZE);
+			}
 		}
 		break;
 	}
