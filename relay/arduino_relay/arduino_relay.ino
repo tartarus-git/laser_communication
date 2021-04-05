@@ -42,6 +42,8 @@ int16_t syncCounter = -1;
 
 void setup() {
   pinMode(STATUS, OUTPUT);
+
+  pinMode(PHOTORESISTOR, INPUT);
   
   // Initialize serial.
   Serial.begin(BAUD_RATE);
@@ -56,10 +58,12 @@ void setup() {
 
   // Receive the connection descriptor.
   for (int i = 0; i < sizeof(desc); i++) {
-    while (analogRead(PHOTORESISTOR) <= baseline) { }
+    //while (analogRead(PHOTORESISTOR) <= baseline) { }
+    while (!digitalRead(PHOTORESISTOR)) { }
+    //delay(1);
     for (int j = 0; j < 8; j++) {
       delay(DESC_BIT_DURATION);
-      if (analogRead(PHOTORESISTOR) > baseline) {
+      if (digitalRead(PHOTORESISTOR)) {
         *((char*)&desc + i) |= HIGH << j;
         continue;
       }
@@ -69,6 +73,12 @@ void setup() {
     delay(DESC_BIT_DURATION);
     delay(DESC_BIT_DURATION);
   }
+
+  Serial.println("Connection descriptor received. Values:");
+  Serial.println(desc.transmissionLength);
+  Serial.println(desc.syncInterval);
+  Serial.println(desc.bitDuration);
+  Serial.println(desc.durationType);
 
   char buffer[BUFFER_SIZE];
 
