@@ -22,12 +22,20 @@ struct ConnectionDescriptor {
   uint8_t durationType;                             // True for microseconds, false for milliseconds.
 } desc;
 
+void blocking_delay(int amount) {
+  for (int i = 0; i < amount; i++) {
+    delayMicroseconds(1000);
+  }
+}
+
+#define DELAY(amount) blocking_delay(amount)
+
 void sleep() {
   if (desc.durationType == MICROSECONDS) {
     delayMicroseconds(desc.bitDuration);
     return;
   }
-  delay(desc.bitDuration);        // TODO: This was just a work-around from the start anyway, can I use 1 number for the delay?
+  DELAY(desc.bitDuration);
 }
 
 #define SLEEP sleep()
@@ -37,6 +45,8 @@ void sync() {
   while (analogRead(PHOTORESISTOR) <= baseline) { }
   SLEEP;
 }
+
+char buffer[BUFFER_SIZE];
 
 int16_t syncCounter = -1;
 
@@ -51,41 +61,42 @@ void setup() {
   // Wait for initialization. This is because the serial-to-usb chip is async. This isn't necessary for serial pins.
   while (!Serial) { }
 
+  //Serial.println("Hi there.");
+
   // TODO: Make the connection descriptor a reoccuring send. This will avoid having to restart over and over all the time.
 
   // Set the baseline brightness to the environmental brightness plus the clearance.
   baseline = analogRead(PHOTORESISTOR) + CLEARANCE;
 
+  //Serial.println(baseline);
+
   // Receive the connection descriptor.
   for (int i = 0; i < sizeof(desc); i++) {
-    //while (analogRead(PHOTORESISTOR) <= baseline) { }
-    while (!digitalRead(PHOTORESISTOR)) { }
-    //delay(1);
+    while (analogRead(PHOTORESISTOR) <= baseline) { }
     for (int j = 0; j < 8; j++) {
-      delay(DESC_BIT_DURATION);
-      if (digitalRead(PHOTORESISTOR)) {
+      DELAY(DESC_BIT_DURATION);
+      if (analogRead(PHOTORESISTOR) > baseline) {
         *((char*)&desc + i) |= HIGH << j;
         continue;
       }
       *((char*)&desc + i) &= ~(HIGH << j);      // TODO: Is there any better way to do this?
     }
     // Give the other device enough time to set up a synchronization point.
-    delay(DESC_BIT_DURATION);
-    delay(DESC_BIT_DURATION);
+    DELAY(DESC_BIT_DURATION);
+    DELAY(DESC_BIT_DURATION);
   }
 
-  Serial.println("Connection descriptor received. Values:");
-  Serial.println(desc.transmissionLength);
-  Serial.println(desc.syncInterval);
-  Serial.println(desc.bitDuration);
-  Serial.println(desc.durationType);
-
-  char buffer[BUFFER_SIZE];
+  //Serial.println("Connection descriptor received. Values:");
+  //Serial.println(desc.transmissionLength);
+  //Serial.println(desc.syncInterval);
+  //Serial.println(desc.bitDuration);
+  //Serial.println(desc.durationType);
 
   bool ledState = false;
   
   while (true) {
     sync();
+    //Serial.println("Synced.");
 
     // Receive the length of the upcoming data transmission.
     uint16_t length;
@@ -98,6 +109,13 @@ void setup() {
       length &= ~(HIGH << i);
       SLEEP;
     }
+
+    interrupts();
+
+    //Serial.println(length);
+    //Serial.flush();
+
+    noInterrupts();
 
     // Invert state of the status LED to show that the correct length was retrieved. This is just for debugging.
     if (length == BUFFER_SIZE) {
@@ -134,7 +152,7 @@ void setup() {
       sync();
     } else { syncCounter++; }
 
-    // Reeive the next byte.
+    // Receive the next byte.
     for (int j = 0; j < 7; j++) {
       if (analogRead(PHOTORESISTOR) > baseline) {
         buffer[length] |= HIGH << j;
@@ -150,9 +168,12 @@ void setup() {
     // Reset syncCounter.
     syncCounter = -1;
 
+    interrupts();
+
     // Output the buffer to serial.
+    //Serial.println("Sending thing...");
     Serial.write(buffer, length);
-    Serial.flush();     // TODO: Do I actually need this here. Figure this stuff out.
+    Serial.flush();
   }
 }
 

@@ -29,7 +29,6 @@ namespace SerialReciever
             }*/
         }
 
-        // TODO: Make the COM thing variable to avoid presentation mess-ups.
         static SerialPort Serial;
         // TODO: Check that this whole static thing is the best way to go. Is there a better way.
         static CrispPictureBox Picture;
@@ -101,8 +100,8 @@ namespace SerialReciever
         static void UpdateImage()
         {
             // Add newly received chunk to the bitmap and display again so that you can see the image being built.
-            bmpData = bmp.LockBits(bounds, ImageLockMode.WriteOnly, PixelFormat.Format1bppIndexed);
-            Marshal.Copy(buffer, pos, bmpData.Scan0 + pos, BytesRead);
+            bmpData = bmp.LockBits(bounds, ImageLockMode.WriteOnly, PixelFormat.Format24bppRgb);
+            Marshal.Copy(buffer, 0, bmpData.Scan0, 30000);
             bmp.UnlockBits(bmpData);
             Picture.Image = bmp;
         }
@@ -111,56 +110,31 @@ namespace SerialReciever
 
         static void receive()
         {
+            int width = 100;
+            int height = 100;
+
+            bmp = new Bitmap(width, height);
+            bounds = new Rectangle(0, 0, width, height);
+
+            pos = 0;
+            int length = 30000;
+
+            buffer = new byte[length];
+
             while (isAlive)
             {
-                int length = 0;
+                BytesRead = Serial.Read(buffer, pos, length - pos);
 
-                // Start receiving image dimensions first.
-                while (isAlive)
+                // Invoke the image updater on the PictureBox thread (which is the main thread) because Bitmap isn't thread safe
+                // and the picture box sometimes uses it when we're using it, which isn't good.
+                // This will prevent that because it has to be done synchronously now.
+                Picture.Invoke(new MethodInvoker(UpdateImage));
+
+                pos += BytesRead;
+                if (pos == length)
                 {
-                    BytesRead = Serial.Read(dimBuf, pos, 8 - pos);              // TODO: Make this async so program doesn't freeze when the image is done.
-                    pos += BytesRead;
-                    if (pos == 8)
-                    {
-                        Console.WriteLine("Received image dimensions.");
-                        unsafe
-                        {
-                            fixed (byte* ptr = dimBuf)
-                            {
-                                int width = *(int*)ptr;
-                                int height = *(int*)(ptr + 4);
-                                Console.WriteLine("Dimensions: " + width + ", " + height);
-
-                                // Create buffer and bitmap and bounds for LockBits.
-                                length = width * height;            // TODO: This obviously isn't right if we're using 1bpp. Fix this.
-                                buffer = new byte[length];
-                                bmp = new Bitmap(width, height);
-                                bounds = new Rectangle(0, 0, width, height);
-
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                pos = 0;
-
-                // Start receiving actual image data.
-                while (isAlive)
-                {
-                    BytesRead = Serial.Read(buffer, pos, length - pos);
-
-                    // Invoke the image updater on the PictureBox thread (which is the main thread) because Bitmap isn't thread safe
-                    // and the picture box sometimes uses it when we're using it, which isn't good.
-                    // This will prevent that because it has to be done synchronously now.
-                    Picture.Invoke(new MethodInvoker(UpdateImage));
-
-                    pos += BytesRead;
-                    if (pos == length)                  // TODO: This obviously won't work with 1bpp.
-                    {
-                        Console.WriteLine("Received the entire image. Ready to receive the next one.");
-                        break;
-                    }
+                    Console.WriteLine("Received the entire image. Ready to receive the next one.");
+                    break;
                 }
             }
         }
