@@ -1,188 +1,150 @@
+// For printf.
+#include <stdio.h>
+
+// Includes for the device file handling.
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <linux/i2c-dev.h>
+#include <unistd.h>
+
+// For GPIO access.
 #include <wiringPi.h>
-#include <iostream> // TODO: Research about including this, and then probably include it because C++ standard and whatnot. Why does stdio.h work instead of this for DoorSensor?
-#include <cstring>
-#include <fstream>
-#include <memory>
-#include <chrono>
-#include <thread>
 
-// Pins
-#define BUTTON 15
-#define BUTTON_SOURCE 16
+// For camera access and image resizing.
+#include <opencv2/core.hpp>
+#include <opencv2/videoio.hpp>
+#include <opencv2/imgproc.hpp>
 
-#define LASER 1
+// Image.
+#define IMAGE_WIDTH 100
+#define IMAGE_HEIGHT 100
+#define IMAGE_SIZE IMAGE_WIDTH * 3 * IMAGE_HEIGHT
 
-// Loop
-#define LOOP_SLEEP 10
+// I2C.
+#define CONVERTER_ADDRESS 3
 
-void log(const char* message) {
-	int len = strlen(message);
-	std::unique_ptr<char[]> buffer = std::make_unique<char[]>(len + 1 + 1);
-	memcpy(buffer.get(), message, len);
-	buffer[len] = '\n';
-	buffer[len + 1] = '\0';
-	printf(buffer.get());
-	buffer.reset(); 	// This frees the memory and sets the pointer inside of the unique_ptr to null. Don't use release(), it won't free the memory, just release
-				// responsibility for it from the unique_ptr.
-}
+// Button.
+#define BUTTON 0				// TODO: Give this an actual pin.
 
-#define DESC_BIT_DURATION 100		// milliseconds.
-
-#pragma pack(1)				// TODO: Figure out why the hell this fixes a bug and makes this work (which it does). It shouldn't do anything should it?
-struct ConnectionDescriptor {
-	int16_t syncInterval;         // The amount of bytes between each synchronization plus 1.
-	uint16_t bitDuration;
-	uint8_t durationType;
-} desc;
-
-void sleep() {
-	if (desc.durationType) {
-		//std::this_thread::sleep_for(std::chrono::microseconds(desc.bitDuration));		// TODO: Is this the proper way to do this?
-		delayMicroseconds(desc.bitDuration - 260);		// This is just an adjustment because of the inaccuracy of sleepMicroseconds. Very weird, but it works.
-		return;
-	}
-	delay(desc.bitDuration);
-}
-
-#define BIT_MASK 0x01
-
-void transmitDescriptor() {
-	for (unsigned int i = 0; i < sizeof(desc); i++) {
-		digitalWrite(LASER, HIGH);
-		for (int j = 0; j < 8; j++) {
-			delay(DESC_BIT_DURATION);
-			if ((*((char*)&desc + i) >> j) & BIT_MASK) {				// TODO: This can technically be optimized, but will you do it?
-				digitalWrite(LASER, HIGH);
-				continue;
-			}
-			digitalWrite(LASER, LOW);
-		}
-		delay(DESC_BIT_DURATION);
-		digitalWrite(LASER, LOW);
-		// Give the other device enough time to prepare for synchronization.
-		delay(DESC_BIT_DURATION);
-		delay(DESC_BIT_DURATION);
-	}
-}
-
-void sync() {
-        digitalWrite(LASER, LOW);
-        sleep();
-        digitalWrite(LASER, HIGH);
-	sleep();
-}
-
-#define SERIAL_DELAY 1000		// In milliseconds.
-
+// Laser.
 #define BUFFER_SIZE 1024
 
-int16_t syncCounter = -1;
+#define MILLISECONDS false
+#define MICROSECONDS true
 
-void transmit(char* data, int length) {
-	int ni = BUFFER_SIZE;
-	uint16_t amount;		// TODO: This amount thing could maybe use some work I think.
-	for (int i = 0; i < length; i = ni, ni += BUFFER_SIZE) {
+// Loop.
+#define LOOP_SLEEP 10							// To make sure that we don't use too much of the processor for nothing.
+
+void log(const char* message) {
+        int len = strlen(message);
+	char* buffer = new char[len + 1 + 1];
+        memcpy(buffer, message, len);
+        buffer[len] = '\n';
+        buffer[len + 1] = '\0';
+        printf(buffer);
+	delete[] buffer;
+}
+
+cv::VideoCapture cap;
+cv::Mat image;
+
+void shoot() {
+	log("Capturing image...");
+        cv::Mat original;
+        cap >> original;
+        log("Sucessfully captured image. Resizing...");
+        cv::resize(original, image, cv::Size(IMAGE_WIDTH, IMAGE_HEIGHT));
+}
+
+#pragma pack(1)
+struct ConnectionDescriptor {
+	uint32_t transmissionLength;					// The length of the entire following transmission.
+	int16_t syncInterval;						// The amount of bytes between each synchronization plus 1.
+	uint16_t bitDuration;
+	uint8_t durationType;						// True for microseconds, false for milliseconds.
+} desc;
+
+int I2CFile;
+
+// Something goes wrong when sending more than 32 bytes at a time because internal buffer on the arduino is 32 bytes for I2C.
+// This splits the message up and waits for a small amount of time between each chunk.
+// That gives the arduino enough time to increment a few numbers and make everything work.
+void writeThroughChunks(char* buffer, int length) {
+	int ni = 32;
+	for (int i = 0; i < length; i = ni, ni += 32) {
 		if (ni > length) {
-			amount = length - i;
-		} else {
-			amount = BUFFER_SIZE;
+			write(I2CFile, buffer + i, length - i);
+			break;
 		}
-		std::cout << amount << std::endl;
-
-		sync();
-
-		// Send length of the next packet.
-		for (int bit = 0; bit < 16; bit++) {
-			digitalWrite(LASER, (amount >> bit) & BIT_MASK);
-			sleep();
-		}
-
-		sleep();
-		sync();
-
-		// Send the packet.
-		for (int byte = 0; byte < amount; byte++) {
-			// Synchronize if the time is right.
-			if (syncCounter == desc.syncInterval) {
-				syncCounter = 0;
-				sleep();		// This is to make sure that the receiver has enough time to start waiting for synchronization.
-				//delay()
-				sync();
-			} else { syncCounter++; }
-
-			// Send the next byte.
-			for (int bit = 0; bit < 8; bit++) {
-				digitalWrite(LASER, (data[i + byte] >> bit) & BIT_MASK);
-				sleep();
-			}
-		}
-
-		syncCounter = -1;
-
-
-		// Give the relay enough time to send the captured data to the receiver over serial.
-		delay(SERIAL_DELAY);
+		write(I2CFile, buffer + i, 32);
+		delay(10);
 	}
 }
 
-void press() {
-	// Load raw image data from file (not the actual RAW format).
-	std::ifstream f("input.raw", std::ios::binary | std::ios::ate);
-	if (f.is_open()) {
-		log("Sucessfully opened the image file. Loading contents...");
-		int length = f.tellg();
-		std::unique_ptr<char[]> buffer = std::make_unique<char[]>(length);
-		f.seekg(0, f.beg);
-		f.read(buffer.get(), length);
-		if (f.gcount() == length) {
-			log("Sucessfully loaded all contents of file.");
-		}
-		else {
-			log("Could not load the contents of file.");
-			f.close();
-			return;
-		}
-		f.close();
-
-		log("Sending data over laser...");
-		transmit(buffer.get(), length);		// TODO: This get() here is okay right? If some sort of exception occurs, were safe, even in the other function right?
-
-		return;
+// Sleep until slave device says that this device can continue.
+// Periodically polls slave device to get regular answers.
+void waitForOk() {
+	char buffer;
+	while (true) {
+		delay(100);
+		if (read(I2CFile, &buffer, 1) == 0) { continue; }
+		if (buffer) { return; }
+		log("Device either didn't respond or said no, so I can't send anymore data.");
 	}
-	log("Could not open the image file.");
 }
-
 
 int main() {
-	// Setup.
-	wiringPiSetup();
-	piHiPri(99);					// Set the priority of this thread to the highest possible. This makes timing better. Only works with sudo.
-	pinMode(LASER, OUTPUT);
-
-	desc.syncInterval = 1;
-	desc.bitDuration = 1;			// In the current state, this needs to be at least 260 for it to work.
-	desc.durationType = false;			// false = milliseconds, true = microseconds. TODO: Make defines for this.
-
-	log("Transmitting descriptor...");
-
-	transmitDescriptor();
-
-	log("Transmitted descriptor.");
-
-	bool buttonState = false;
-	while (true) {
-		// Add a delay so as to not use 100% of the CPU (or even just 1 of its cores).
-                delay(LOOP_SLEEP);
-
-		//if (digitalRead(BUTTON)) { // TODO: Put this back in.
-		if (true) {
-			if (buttonState) { continue; }
-			// Trigger a press event.
-			press();
-			buttonState = true;
-		}
-		else {
-			buttonState = false;
-		}
+	// Open I2C connection to the Arduino converter.
+	if ((I2CFile = open("/dev/i2c-1", O_RDWR)) == -1) {
+		log("Failed to open the I2C bus. Quitting...");
+		return 0;
 	}
+	if (ioctl(I2CFile, I2C_SLAVE, CONVERTER_ADDRESS) == -1) {
+		log("Failed to open connection to I2C slave device. Quitting...");
+		close(I2CFile);
+		return 0;
+	}
+
+	// Set up WiringPi.
+	wiringPiSetup();
+	pinMode(BUTTON, INPUT);				// TODO: Do you have to explicitly say this if it's just an input like in arduino?
+
+	// Initialize camera.
+	cap = cv::VideoCapture(0);
+	if (!cap.isOpened()) {
+		log("Failed to initialize the camera. Quitting...");
+		close(I2CFile);
+		return 0;
+	}
+
+	// Connection descriptor setup.
+	desc.transmissionLength = IMAGE_SIZE;
+	printf("%d\n", IMAGE_SIZE);
+	desc.syncInterval = 2;
+	desc.bitDuration = 250;
+	desc.durationType = MICROSECONDS;
+
+	// Enter loop and wait for someone to press button.
+	while (true) {
+		delay(LOOP_SLEEP);
+		if (true) {
+			shoot();
+			log("Sending the image over I2C...");
+			write(I2CFile, &desc, sizeof(desc));
+			int ni = BUFFER_SIZE;
+			for (int i = 0; i < IMAGE_SIZE; i = ni, ni += BUFFER_SIZE) {
+				waitForOk();
+				log("Chunk done.");
+				if (ni > IMAGE_SIZE) {
+					writeThroughChunks((char*)image.data + i, IMAGE_SIZE - i);
+					break;
+				}
+				writeThroughChunks((char*)image.data + i, BUFFER_SIZE);
+			}
+		}
+		break;
+	}
+
+	// Close I2C connection.
+	close(I2CFile);
 }
