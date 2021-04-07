@@ -24,7 +24,12 @@
 #define CONVERTER_ADDRESS 3
 
 // Button.
-#define BUTTON 0				// TODO: Give this an actual pin.
+#define SOURCE 21
+#define BUTTON 25
+
+// Reset pin for arduino laser card.
+#define RESET 29
+#define RESET_WAIT 2000							// In milliseconds.
 
 // Laser.
 #define BUFFER_SIZE 1024
@@ -35,6 +40,7 @@
 // Loop.
 #define LOOP_SLEEP 10							// To make sure that we don't use too much of the processor for nothing.
 
+// Simple logging code so that I don't constantly have to use printf and newline and such.
 void log(const char* message) {
         int len = strlen(message);
 	char* buffer = new char[len + 1 + 1];
@@ -45,9 +51,11 @@ void log(const char* message) {
 	delete[] buffer;
 }
 
+// Set up some variables that OpenCV uses for video capture.
 cv::VideoCapture cap;
 cv::Mat image;
 
+// Code for shooting an image and resizing it to fit the desired dimensions.
 void shoot() {
 	log("Capturing image...");
         cv::Mat original;
@@ -56,14 +64,16 @@ void shoot() {
         cv::resize(original, image, cv::Size(IMAGE_WIDTH, IMAGE_HEIGHT));
 }
 
+// TODO: Had some weird bugs when I left out pragma pack, even though it technically shouldn't change anything in this case, find out why.
 #pragma pack(1)
 struct ConnectionDescriptor {
 	uint32_t transmissionLength;					// The length of the entire following transmission.
 	int16_t syncInterval;						// The amount of bytes between each synchronization plus 1.
-	uint16_t bitDuration;
+	uint16_t bitDuration;						// The duration of one single bit within the laser communication.
 	uint8_t durationType;						// True for microseconds, false for milliseconds.
 } desc;
 
+// Storage variable for the file descriptor for the I2C virtual file thing.
 int I2CFile;
 
 // Something goes wrong when sending more than 32 bytes at a time because internal buffer on the arduino is 32 bytes for I2C.
@@ -81,15 +91,32 @@ void writeThroughChunks(char* buffer, int length) {
 	}
 }
 
+// This makes sure that the button has to be let go before it can trigger another press event.
+bool buttonPrevState = false;
+bool pollButton() {
+        if (digitalRead(BUTTON)) {
+                if (buttonPrevState) { return false; }
+                buttonPrevState = true;
+                return true;
+        }
+        buttonPrevState = false;
+        return false;
+}
+
 // Sleep until slave device says that this device can continue.
 // Periodically polls slave device to get regular answers.
-void waitForOk() {
+// If no answer is received because slave is busy with a time critical process, busy is assumed.
+bool waitForOk() {
 	char buffer;
 	while (true) {
 		delay(100);
 		if (read(I2CFile, &buffer, 1) == 0) { continue; }
-		if (buffer) { return; }
-		log("Device either didn't respond or said no, so I can't send anymore data.");
+		if (buffer) { return false; }
+		log("Slave busy.");
+		if (pollButton()) {
+			log("Button interrupt received. Shutting down transmission and resetting laser card...");
+			return true;
+		}
 	}
 }
 
@@ -105,9 +132,13 @@ int main() {
 		return 0;
 	}
 
-	// Set up WiringPi.
+	// Set up WiringPi and pins.
 	wiringPiSetup();
+	pinMode(SOURCE, OUTPUT);
+	digitalWrite(SOURCE, HIGH);
 	pinMode(BUTTON, INPUT);				// TODO: Do you have to explicitly say this if it's just an input like in arduino?
+	pullUpDnControl(BUTTON, PUD_DOWN);
+	pinMode(RESET, OUTPUT);
 
 	// Initialize camera.
 	cap = cv::VideoCapture(0);
@@ -119,7 +150,7 @@ int main() {
 
 	// Connection descriptor setup.
 	desc.transmissionLength = IMAGE_SIZE;
-	printf("%d\n", IMAGE_SIZE);
+	printf("Image size: %d\n", IMAGE_SIZE);
 	desc.syncInterval = 2;
 	desc.bitDuration = 250;
 	desc.durationType = MICROSECONDS;
@@ -127,24 +158,31 @@ int main() {
 	// Enter loop and wait for someone to press button.
 	while (true) {
 		delay(LOOP_SLEEP);
-		if (true) {
+		if (pollButton()) {					// If button is held down at this moment, shoot image and start sending.
+			log("Shooting image...");
 			shoot();
 			log("Sending the image over I2C...");
 			write(I2CFile, &desc, sizeof(desc));
 			int ni = BUFFER_SIZE;
 			for (int i = 0; i < IMAGE_SIZE; i = ni, ni += BUFFER_SIZE) {
-				waitForOk();
-				log("Chunk done.");
+				if (waitForOk()) { break; }
+				log("Packet arrived at photoresistor.");
 				if (ni > IMAGE_SIZE) {
 					writeThroughChunks((char*)image.data + i, IMAGE_SIZE - i);
+					log("Entire image was sucessfully transmitted. Waiting for human input...");
 					break;
 				}
 				writeThroughChunks((char*)image.data + i, BUFFER_SIZE);
 			}
+			// Send a reset signal to the laser card because either waitForOk() triggered or the entire image has been sent.
+                	// In the latter case, this isn't strictly necessary, but in case something went wrong somewhere, why not do it?
+			digitalWrite(RESET, HIGH);
+                	delay(RESET_WAIT);
+                	digitalWrite(RESET, LOW);
 		}
-		break;
 	}
 
 	// Close I2C connection.
-	close(I2CFile);
+	// TODO: This can never be reached so it doesn't make any sense to have here.
+	close(I2CFile);					// TODO: Make this dispose itself on signal interrupt too.
 }
