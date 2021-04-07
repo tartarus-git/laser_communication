@@ -205,14 +205,16 @@ void loop() {
   while (true) {
     //Serial.println(bufferPos);
     //Serial.println(isReady);
-    Serial.flush();
+    //Serial.flush();
     //if (pollReset()) { return; }
+    DELAY(100);
     if (bufferPos == BUFFER_SIZE) {
       isReady = false;
       noInterrupts();
       transmit(buffer, bufferPos);
       interrupts();
       Serial.println(transmissionPos);
+      Serial.flush();
       resetBuffer();
       isReady = true;
       continue;
