@@ -151,8 +151,8 @@ int main() {
 	// Connection descriptor setup.
 	desc.transmissionLength = IMAGE_SIZE;
 	printf("Image size: %d\n", IMAGE_SIZE);
-	desc.syncInterval = 2;
-	desc.bitDuration = 250;
+	desc.syncInterval = 1;
+	desc.bitDuration = 500;
 	desc.durationType = MICROSECONDS;
 
 	// Enter loop and wait for someone to press button.
