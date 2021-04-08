@@ -76,6 +76,18 @@ struct ConnectionDescriptor {
 // Storage variable for the file descriptor for the I2C virtual file thing.
 int I2CFile;
 
+// This makes sure that the button has to be let go before it can trigger another press event.
+bool buttonPrevState = false;
+bool pollButton() {
+        if (digitalRead(BUTTON)) {
+                if (buttonPrevState) { return false; }
+                buttonPrevState = true;
+                return true;
+        }
+        buttonPrevState = false;
+        return false;
+}
+
 // Sleep until slave device says that this device can continue.
 // Periodically polls slave device to get regular answers.
 // If no answer is received because slave is busy with a time critical process, busy is assumed.
@@ -106,18 +118,6 @@ void writeThroughChunks(char* buffer, int length) {
 		write(I2CFile, buffer + i, 32);
 		waitForOk();
 	}
-}
-
-// This makes sure that the button has to be let go before it can trigger another press event.
-bool buttonPrevState = false;
-bool pollButton() {
-        if (digitalRead(BUTTON)) {
-                if (buttonPrevState) { return false; }
-                buttonPrevState = true;
-                return true;
-        }
-        buttonPrevState = false;
-        return false;
 }
 
 int main() {
