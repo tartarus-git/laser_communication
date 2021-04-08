@@ -94,11 +94,11 @@ bool pollButton() {
 bool waitForOk() {
         char buffer;
         while (true) {
-                delay(100);
+                delay(400);
                 if (read(I2CFile, &buffer, 1) == 0) { continue; }
                 if (buffer) { return false; }
                 log("Slave busy.");
-                if (pollButton()) {
+                if (pollButton()) {		// TODO: I think you should move this up a little bit.
                         log("Button interrupt received. Shutting down transmission and resetting laser card...");
                         return true;
                 }
@@ -116,7 +116,9 @@ void writeThroughChunks(char* buffer, int length) {
 			break;
 		}
 		write(I2CFile, buffer + i, 32);
-		waitForOk();
+		delay(10);
+		waitForOk();		// TODO: Make this work with reset.
+		delay(100);
 	}
 }
 
@@ -151,8 +153,8 @@ int main() {
 	// Connection descriptor setup.
 	desc.transmissionLength = IMAGE_SIZE;
 	printf("Image size: %d\n", IMAGE_SIZE);
-	desc.syncInterval = 1;
-	desc.bitDuration = 500;
+	desc.syncInterval = 2;
+	desc.bitDuration = 250;
 	desc.durationType = MICROSECONDS;
 
 	// Enter loop and wait for someone to press button.
@@ -165,7 +167,9 @@ int main() {
 			write(I2CFile, &desc, sizeof(desc));
 			int ni = BUFFER_SIZE;
 			for (int i = 0; i < IMAGE_SIZE; i = ni, ni += BUFFER_SIZE) {
-				if (waitForOk()) { break; }
+				//if (waitForOk()) { break; }
+				//delay(10000);
+				waitForOk();
 				log("Packet arrived at photoresistor.");
 				if (ni > IMAGE_SIZE) {
 					writeThroughChunks((char*)image.data + i, IMAGE_SIZE - i);
