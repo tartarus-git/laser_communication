@@ -3,8 +3,19 @@
 // Serial.
 #define BAUD_RATE 115200
 
-// I2C.
-#define I2C_ADDRESS 3
+// Laser card protocol.
+#define CARD_0 12
+#define CARD_1 11
+#define CARD_2 10
+#define CARD_3 9
+#define CARD_4 8
+#define CARD_5 7
+#define CARD_6 6
+#define CARD_7 5
+
+#define CARD_TRIGGER 3                                      // Has to be either 2 or 3 because we're using it for interrupts.
+
+#define CARD_FREE_FLAG A3
 
 // Pins.
 #define RESET A2                                            // Raspberry Pi sets this HIGH when this card should reset.
@@ -26,37 +37,26 @@ void toggleStatus() {
   digitalWrite(STATUS, statusPrevState = !statusPrevState);
 }
 
-// Request callback for I2C, responsible for telling the sender when it can send the next packet.
-volatile bool isReady = false;
-void I2CRequest() {
-  Wire.write((char*)&isReady, 1);                           // Send the status flag to the master.
-}
-
-// Buffer for receiving I2C and sending through laser.
+// Buffer for receiving laser card protocol and sending through laser.
 volatile char buffer[BUFFER_SIZE];                          // Volatile tells compiler not to cache values because variable could change outside of compilers scope.
 volatile int bufferPos = 0;
 volatile uint16_t transmissionPos = 0;
 
-volatile uint32_t numEvents = 0;
-
-// Receive event callback for I2C, triggers through interrupt every time data comes in.
-void I2CReceive(int amount) {
-  isReady = false;                                          // Set ready flag so that the master device waits for this device to finish processing this chunk.
-  numEvents++;
-  //Wire.readBytes((char*)buffer + bufferPos, amount);
-  //bufferPos += amount;
-  //transmissionPos += amount;
-
-  while (Wire.available()) {
-    *(buffer + bufferPos) = Wire.read();
-    bufferPos++;
-    transmissionPos++;
-  }
-  
-  // Don't set ready flag here because the Wire library could do something after this function, which we want to account for.
+void laserCardProtocolDumpInterrupt() {
+  if (digitalRead(CARD_0)) { buffer[bufferPos] |= HIGH; } else { buffer[bufferPos] &= 0b11111110; }
+  if (digitalRead(CARD_1)) { buffer[bufferPos] |= HIGH << 1; } else { buffer[bufferPos] &= 0b11111101; }
+  if (digitalRead(CARD_2)) { buffer[bufferPos] |= HIGH << 2; } else { buffer[bufferPos] &= 0b11111011; }
+  if (digitalRead(CARD_3)) { buffer[bufferPos] |= HIGH << 3; } else { buffer[bufferPos] &= 0b11110111; }
+  if (digitalRead(CARD_4)) { buffer[bufferPos] |= HIGH << 4; } else { buffer[bufferPos] &= 0b11101111; }
+  if (digitalRead(CARD_5)) { buffer[bufferPos] |= HIGH << 5; } else { buffer[bufferPos] &= 0b11011111; }
+  if (digitalRead(CARD_6)) { buffer[bufferPos] |= HIGH << 6; } else { buffer[bufferPos] &= 0b10111111; }
+  if (digitalRead(CARD_7)) { buffer[bufferPos] |= HIGH << 7; } else { buffer[bufferPos] &= 0b01111111; }
+  // TODO: Maybe do direct digital reads here through that other way, the pins might already be packaged inside of a number there.
+  // That would mean you would have to do a lot less here.
+  bufferPos++;
+  transmissionPos++;
 }
 
-// I've put these inside of functions for future expandability. Not strictly necessary,
 void resetBuffer() { bufferPos = 0; }
 void resetTransmission() { transmissionPos = 0; }
 
@@ -74,10 +74,19 @@ void setup() {
   Serial.begin(BAUD_RATE);
   while (!Serial) { }                                       // Wait for serial to initialize.
   
-  // I2C setup.
-  Wire.begin(I2C_ADDRESS);
-  Wire.onReceive(I2CReceive);                               // Register callback for receiving data.
-  Wire.onRequest(I2CRequest);                               // Register callback for listening for data requests.
+  // Laser card protocol setup.
+  pinMode(CARD_0, INPUT);
+  pinMode(CARD_1, INPUT);
+  pinMode(CARD_2, INPUT);
+  pinMode(CARD_3, INPUT);
+  pinMode(CARD_4, INPUT);
+  pinMode(CARD_5, INPUT);
+  pinMode(CARD_6, INPUT);
+  pinMode(CARD_7, INPUT);
+  pinMode(CARD_TRIGGER, INPUT);
+  pinMode(CARD_FREE_FLAG, OUTPUT);
+
+  attachInterrupt(digitalPinToInterrupt(CARD_TRIGGER), laserCardProtocolDumpInterrupt, RISING);
 }
 
 // Contains connection information which is used to set up the high-speed connection.
@@ -190,18 +199,21 @@ bool pollReset() {
 void loop() {
   Serial.println("Awaiting transmission...");
 
-  isReady = true;                                             // Activate data transfer.
+  //isReady = true;                                             // Activate data transfer.
+  digitalWrite(CARD_FREE_FLAG, HIGH);
   
   // Receive connection descriptor through I2C and relay it through laser.
   while (true) {
-    Serial.flush();
+    //Serial.flush();
     //isReady = true;                                           // Reactivate data transfer in case I2CReceive turned it off.
     //if (pollReset()) { return; }                              // Because returning starts the loop() function again.
+    delay(10);
     if (bufferPos == sizeof(desc)) {
+      digitalWrite(CARD_FREE_FLAG, LOW);
       //isReady = false;                                        // Prevent further data transfer until laser transfer is complete.
       desc = *(ConnectionDescriptor*)buffer;
       noInterrupts();
-      //transmitDescriptor();
+      transmitDescriptor();
       interrupts();
       resetBuffer();
       resetTransmission();
@@ -210,24 +222,27 @@ void loop() {
     //isReady = true;                                           // Reactivate data transfer in case I2CReceive turned it off.
   }
 
-  //Serial.println("Descriptor received. The following transmission is this many bytes long:");
-  //Serial.println(desc.transmissionLength);
-  //Serial.println("Progress:");
+  Serial.println("Descriptor received. The following transmission is this many bytes long:");
+  Serial.println(desc.transmissionLength);
+  Serial.println("Progress:");
 
   //isReady = true;                                             // Reactivate data transfer.
 
+  digitalWrite(CARD_FREE_FLAG, HIGH);
+  
   // Receive transmission and relay it through the laser.
   while (true) {
-    isReady = true;                                           // Reactivate data transfer in case I2CReceive turned it off.
+    //isReady = true;                                           // Reactivate data transfer in case I2CReceive turned it off.
     Serial.println(bufferPos);
-    Serial.println(numEvents);
+    //Serial.println(numEvents);
     Serial.flush();
-    delay(600);
-    isReady = false;
     delay(100);
+    //isReady = false;
+    //delay(100);
     //isReady = true;                                           // Reactivate data transfer in case I2CReceive turned it off.
     //if (pollReset()) { return; }
     if (bufferPos == BUFFER_SIZE) {
+      digitalWrite(CARD_FREE_FLAG, LOW);
       //isReady = false;
       noInterrupts();
       transmit(buffer, bufferPos);
@@ -236,9 +251,11 @@ void loop() {
       Serial.flush();
       resetBuffer();
       //isReady = true;
+      digitalWrite(CARD_FREE_FLAG, HIGH);
       continue;
     }
     if (transmissionPos == desc.transmissionLength) {
+      digitalWrite(CARD_FREE_FLAG, LOW);
       //isReady = false;
       noInterrupts();
       transmit(buffer, bufferPos);

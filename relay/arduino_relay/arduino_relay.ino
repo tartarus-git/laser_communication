@@ -1,6 +1,7 @@
 // Pins.
+#define SOURCE A2
 #define PHOTORESISTOR A0
-#define CLEARANCE 10
+#define CLEARANCE 100
 #define STATUS 13                                   // Built-in status LED on the Arduino is on pin 13.
 
 // Serial.
@@ -53,6 +54,8 @@ int16_t syncCounter = -1;
 void setup() {
   pinMode(STATUS, OUTPUT);
 
+  pinMode(SOURCE, OUTPUT);
+  digitalWrite(SOURCE, HIGH);
   pinMode(PHOTORESISTOR, INPUT);
   
   // Initialize serial.
@@ -61,14 +64,14 @@ void setup() {
   // Wait for initialization. This is because the serial-to-usb chip is async. This isn't necessary for serial pins.
   while (!Serial) { }
 
-  //Serial.println("Hi there.");
+  Serial.println("Hi there.");
 
   // TODO: Make the connection descriptor a reoccuring send. This will avoid having to restart over and over all the time.
 
   // Set the baseline brightness to the environmental brightness plus the clearance.
   baseline = analogRead(PHOTORESISTOR) + CLEARANCE;
 
-  //Serial.println(baseline);
+  Serial.println(baseline);
 
   // Receive the connection descriptor.
   for (int i = 0; i < sizeof(desc); i++) {
@@ -86,11 +89,11 @@ void setup() {
     DELAY(DESC_BIT_DURATION);
   }
 
-  //Serial.println("Connection descriptor received. Values:");
-  //Serial.println(desc.transmissionLength);
-  //Serial.println(desc.syncInterval);
-  //Serial.println(desc.bitDuration);
-  //Serial.println(desc.durationType);
+  Serial.println("Connection descriptor received. Values:");
+  Serial.println(desc.transmissionLength);
+  Serial.println(desc.syncInterval);
+  Serial.println(desc.bitDuration);
+  Serial.println(desc.durationType);
 
   bool ledState = false;
   
