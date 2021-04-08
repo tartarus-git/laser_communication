@@ -1,12 +1,6 @@
 // For printf.
 #include <stdio.h>
 
-// Includes for the device file handling.
-#include <fcntl.h>
-#include <sys/ioctl.h>
-#include <linux/i2c-dev.h>
-#include <unistd.h>
-
 // For GPIO access.
 #include <wiringPi.h>
 
@@ -20,8 +14,16 @@
 #define IMAGE_HEIGHT 100
 #define IMAGE_SIZE IMAGE_WIDTH * 3 * IMAGE_HEIGHT
 
-// I2C.
-#define CONVERTER_ADDRESS 3
+// Laser card protocol.
+#define CARD_0 0							// Bit channels for laser card communication.
+#define CARD_1 0
+#define CARD_2 0
+#define CARD_3 0
+#define CARD_4 0
+#define CARD_5 0
+#define CARD_7 0
+#define CARD_TRIGGER 0.							// Triggers the dumping of the byte onto the laser card.
+
 
 // Button.
 #define SOURCE 21
@@ -73,9 +75,6 @@ struct ConnectionDescriptor {
 	uint8_t durationType;						// True for microseconds, false for milliseconds.
 } desc;
 
-// Storage variable for the file descriptor for the I2C virtual file thing.
-int I2CFile;
-
 // This makes sure that the button has to be let go before it can trigger another press event.
 bool buttonPrevState = false;
 bool pollButton() {
@@ -88,52 +87,7 @@ bool pollButton() {
         return false;
 }
 
-// Sleep until slave device says that this device can continue.
-// Periodically polls slave device to get regular answers.
-// If no answer is received because slave is busy with a time critical process, busy is assumed.
-bool waitForOk() {
-        char buffer;
-        while (true) {
-                delay(400);
-                if (read(I2CFile, &buffer, 1) == 0) { continue; }
-                if (buffer) { return false; }
-                log("Slave busy.");
-                if (pollButton()) {		// TODO: I think you should move this up a little bit.
-                        log("Button interrupt received. Shutting down transmission and resetting laser card...");
-                        return true;
-                }
-        }
-}
-
-// Something goes wrong when sending more than 32 bytes at a time because internal buffer on the arduino is 32 bytes for I2C.
-// This splits the message up and waits for a small amount of time between each chunk.
-// That gives the arduino enough time to increment a few numbers and make everything work.
-void writeThroughChunks(char* buffer, int length) {
-	int ni = 32;
-	for (int i = 0; i < length; i = ni, ni += 32) {
-		if (ni > length) {
-			write(I2CFile, buffer + i, length - i);
-			break;
-		}
-		write(I2CFile, buffer + i, 32);
-		delay(10);
-		waitForOk();		// TODO: Make this work with reset.
-		delay(100);
-	}
-}
-
 int main() {
-	// Open I2C connection to the Arduino converter.
-	if ((I2CFile = open("/dev/i2c-1", O_RDWR)) == -1) {
-		log("Failed to open the I2C bus. Quitting...");
-		return 0;
-	}
-	if (ioctl(I2CFile, I2C_SLAVE, CONVERTER_ADDRESS) == -1) {
-		log("Failed to open connection to I2C slave device. Quitting...");
-		close(I2CFile);
-		return 0;
-	}
-
 	// Set up WiringPi and pins.
 	wiringPiSetup();
 	pinMode(SOURCE, OUTPUT);
@@ -163,30 +117,23 @@ int main() {
 		if (pollButton()) {					// If button is held down at this moment, shoot image and start sending.
 			log("Shooting image...");
 			shoot();
-			log("Sending the image over I2C...");
-			write(I2CFile, &desc, sizeof(desc));
+			log("Sending image to laser card...");
+			// Send descriptor.
 			int ni = BUFFER_SIZE;
 			for (int i = 0; i < IMAGE_SIZE; i = ni, ni += BUFFER_SIZE) {
-				//if (waitForOk()) { break; }
-				//delay(10000);
-				waitForOk();
 				log("Packet arrived at photoresistor.");
 				if (ni > IMAGE_SIZE) {
-					writeThroughChunks((char*)image.data + i, IMAGE_SIZE - i);
+					// Send last bit of transmission.
 					log("Entire image was sucessfully transmitted. Waiting for human input...");
 					break;
 				}
-				writeThroughChunks((char*)image.data + i, BUFFER_SIZE);
+				// Send transmission in packets.
 			}
-			// Send a reset signal to the laser card because either waitForOk() triggered or the entire image has been sent.
+			// Send a reset signal to the laser card because either button was pressed or the entire image has been sent.
                 	// In the latter case, this isn't strictly necessary, but in case something went wrong somewhere, why not do it?
 			digitalWrite(RESET, HIGH);
                 	delay(RESET_WAIT);
                 	digitalWrite(RESET, LOW);
 		}
 	}
-
-	// Close I2C connection.
-	// TODO: This can never be reached so it doesn't make any sense to have here.
-	close(I2CFile);					// TODO: Make this dispose itself on signal interrupt too.
 }
