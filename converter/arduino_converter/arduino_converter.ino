@@ -37,13 +37,23 @@ volatile char buffer[BUFFER_SIZE];                          // Volatile tells co
 volatile int bufferPos = 0;
 volatile uint16_t transmissionPos = 0;
 
+volatile uint32_t numEvents = 0;
+
 // Receive event callback for I2C, triggers through interrupt every time data comes in.
 void I2CReceive(int amount) {
   isReady = false;                                          // Set ready flag so that the master device waits for this device to finish processing this chunk.
-  Wire.readBytes((char*)buffer + bufferPos, amount);
-  bufferPos += amount;
-  transmissionPos += amount;
-  // Don't unset ready flag here because the Wire library could do something after this function, which we want to account for.
+  numEvents++;
+  //Wire.readBytes((char*)buffer + bufferPos, amount);
+  //bufferPos += amount;
+  //transmissionPos += amount;
+
+  while (Wire.available()) {
+    *(buffer + bufferPos) = Wire.read();
+    bufferPos++;
+    transmissionPos++;
+  }
+  
+  // Don't set ready flag here because the Wire library could do something after this function, which we want to account for.
 }
 
 // I've put these inside of functions for future expandability. Not strictly necessary,
@@ -184,42 +194,52 @@ void loop() {
   
   // Receive connection descriptor through I2C and relay it through laser.
   while (true) {
-    if (pollReset()) { return; }                              // Because returning starts the loop() function again.
+    Serial.flush();
+    //isReady = true;                                           // Reactivate data transfer in case I2CReceive turned it off.
+    //if (pollReset()) { return; }                              // Because returning starts the loop() function again.
     if (bufferPos == sizeof(desc)) {
-      isReady = false;                                        // Prevent further data transfer until laser transfer is complete.
+      //isReady = false;                                        // Prevent further data transfer until laser transfer is complete.
       desc = *(ConnectionDescriptor*)buffer;
       noInterrupts();
-      transmitDescriptor();
+      //transmitDescriptor();
       interrupts();
       resetBuffer();
       resetTransmission();
       break;
     }
-    isReady = true;                                           // Reactivate data transfer in case I2CReceive turned it off.
+    //isReady = true;                                           // Reactivate data transfer in case I2CReceive turned it off.
   }
 
-  Serial.println("Descriptor received. The following transmission is this many bytes long:");
-  Serial.println(desc.transmissionLength);
-  Serial.println("Progress:");
+  //Serial.println("Descriptor received. The following transmission is this many bytes long:");
+  //Serial.println(desc.transmissionLength);
+  //Serial.println("Progress:");
 
-  isReady = true;                                             // Reactivate data transfer.
+  //isReady = true;                                             // Reactivate data transfer.
 
   // Receive transmission and relay it through the laser.
   while (true) {
-    if (pollReset()) { return; }
+    isReady = true;                                           // Reactivate data transfer in case I2CReceive turned it off.
+    Serial.println(bufferPos);
+    Serial.println(numEvents);
+    Serial.flush();
+    delay(600);
+    isReady = false;
+    delay(100);
+    //isReady = true;                                           // Reactivate data transfer in case I2CReceive turned it off.
+    //if (pollReset()) { return; }
     if (bufferPos == BUFFER_SIZE) {
-      isReady = false;
+      //isReady = false;
       noInterrupts();
       transmit(buffer, bufferPos);
       interrupts();
       Serial.println(transmissionPos);
       Serial.flush();
       resetBuffer();
-      isReady = true;
+      //isReady = true;
       continue;
     }
     if (transmissionPos == desc.transmissionLength) {
-      isReady = false;
+      //isReady = false;
       noInterrupts();
       transmit(buffer, bufferPos);
       interrupts();
@@ -227,7 +247,7 @@ void loop() {
       resetTransmission();
       break;
     }
-    isReady = true;                                           // Reactivate data transfer in case I2CReceive turned it off.
+    //isReady = true;                                           // Reactivate data transfer in case I2CReceive turned it off.
   }
 
   Serial.println(desc.transmissionLength);
