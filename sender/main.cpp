@@ -76,6 +76,23 @@ struct ConnectionDescriptor {
 // Storage variable for the file descriptor for the I2C virtual file thing.
 int I2CFile;
 
+// Sleep until slave device says that this device can continue.
+// Periodically polls slave device to get regular answers.
+// If no answer is received because slave is busy with a time critical process, busy is assumed.
+bool waitForOk() {
+        char buffer;
+        while (true) {
+                delay(100);
+                if (read(I2CFile, &buffer, 1) == 0) { continue; }
+                if (buffer) { return false; }
+                log("Slave busy.");
+                if (pollButton()) {
+                        log("Button interrupt received. Shutting down transmission and resetting laser card...");
+                        return true;
+                }
+        }
+}
+
 // Something goes wrong when sending more than 32 bytes at a time because internal buffer on the arduino is 32 bytes for I2C.
 // This splits the message up and waits for a small amount of time between each chunk.
 // That gives the arduino enough time to increment a few numbers and make everything work.
@@ -87,7 +104,7 @@ void writeThroughChunks(char* buffer, int length) {
 			break;
 		}
 		write(I2CFile, buffer + i, 32);
-		delay(10);
+		waitForOk();
 	}
 }
 
@@ -101,23 +118,6 @@ bool pollButton() {
         }
         buttonPrevState = false;
         return false;
-}
-
-// Sleep until slave device says that this device can continue.
-// Periodically polls slave device to get regular answers.
-// If no answer is received because slave is busy with a time critical process, busy is assumed.
-bool waitForOk() {
-	char buffer;
-	while (true) {
-		delay(100);
-		if (read(I2CFile, &buffer, 1) == 0) { continue; }
-		if (buffer) { return false; }
-		log("Slave busy.");
-		if (pollButton()) {
-			log("Button interrupt received. Shutting down transmission and resetting laser card...");
-			return true;
-		}
-	}
 }
 
 int main() {
