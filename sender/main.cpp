@@ -15,15 +15,21 @@
 #define IMAGE_SIZE IMAGE_WIDTH * 3 * IMAGE_HEIGHT
 
 // Laser card protocol.
-#define CARD_0 0							// Bit channels for laser card communication.
-#define CARD_1 0
-#define CARD_2 0
-#define CARD_3 0
-#define CARD_4 0
-#define CARD_5 0
-#define CARD_7 0
-#define CARD_TRIGGER 0.							// Triggers the dumping of the byte onto the laser card.
+#define CARD_0 8							// Bit channels for laser card communication.
+#define CARD_1 9
+#define CARD_2 7
+#define CARD_3 15
+#define CARD_4 16
+#define CARD_5 1
+#define CARD_6 0
+#define CARD_7 2
 
+#define CARD_TRIGGER 3							// Triggers the dumping of the byte onto the laser card.
+#define CARD_TRIGGER_DURATION 500					// In microseconds.
+
+#define CARD_OPEN_FLAG 12
+
+#define BIT_MASK 0x01
 
 // Button.
 #define SOURCE 21
@@ -87,6 +93,32 @@ bool pollButton() {
         return false;
 }
 
+void sendToLaserCard(const uchar* buffer, int length) {
+	for (int bytePos = 0; bytePos < length; bytePos++) {
+		digitalWrite(CARD_0, buffer[bytePos] & BIT_MASK);
+		digitalWrite(CARD_1, (buffer[bytePos] >> 1) & BIT_MASK);
+		digitalWrite(CARD_2, (buffer[bytePos] >> 2) & BIT_MASK);
+		digitalWrite(CARD_3, (buffer[bytePos] >> 3) & BIT_MASK);
+		digitalWrite(CARD_4, (buffer[bytePos] >> 4) & BIT_MASK);
+		digitalWrite(CARD_5, (buffer[bytePos] >> 5) & BIT_MASK);
+		digitalWrite(CARD_6, (buffer[bytePos] >> 6) & BIT_MASK);
+		digitalWrite(CARD_7, buffer[bytePos] >> 7);
+		digitalWrite(CARD_TRIGGER, HIGH);
+		delayMicroseconds(CARD_TRIGGER_DURATION);
+		digitalWrite(CARD_TRIGGER, LOW);
+		delayMicroseconds(CARD_TRIGGER_DURATION);
+	}
+}
+
+bool waitForLaserCardOpen() {
+	while(true) {
+		if (digitalRead(CARD_OPEN_FLAG)) { return true; }
+		// Do push button things here.
+		delay(10);		// TODO: Make this into a constant because it looks better.
+	}
+	return false;
+}
+
 int main() {
 	// Set up WiringPi and pins.
 	wiringPiSetup();
@@ -96,11 +128,21 @@ int main() {
 	pullUpDnControl(BUTTON, PUD_DOWN);
 	pinMode(RESET, OUTPUT);
 
+	pinMode(CARD_0, OUTPUT);
+	pinMode(CARD_1, OUTPUT);
+	pinMode(CARD_2, OUTPUT);
+	pinMode(CARD_3, OUTPUT);
+	pinMode(CARD_4, OUTPUT);
+	pinMode(CARD_5, OUTPUT);
+	pinMode(CARD_6, OUTPUT);
+	pinMode(CARD_7, OUTPUT);
+	pinMode(CARD_TRIGGER, OUTPUT);
+	pinMode(CARD_OPEN_FLAG, INPUT);
+
 	// Initialize camera.
 	cap = cv::VideoCapture(0);
 	if (!cap.isOpened()) {
 		log("Failed to initialize the camera. Quitting...");
-		close(I2CFile);
 		return 0;
 	}
 
@@ -118,16 +160,19 @@ int main() {
 			log("Shooting image...");
 			shoot();
 			log("Sending image to laser card...");
-			// Send descriptor.
+			sendToLaserCard((uchar*)&desc, sizeof(desc));
 			int ni = BUFFER_SIZE;
 			for (int i = 0; i < IMAGE_SIZE; i = ni, ni += BUFFER_SIZE) {
+				delay(1000);			// TODO: Make this into a constant obviously.
+				waitForLaserCardOpen();
+				//delay(10000);
 				log("Packet arrived at photoresistor.");
 				if (ni > IMAGE_SIZE) {
-					// Send last bit of transmission.
+					sendToLaserCard(image.data + i, IMAGE_SIZE - i);
 					log("Entire image was sucessfully transmitted. Waiting for human input...");
 					break;
 				}
-				// Send transmission in packets.
+				sendToLaserCard(image.data + i, BUFFER_SIZE);
 			}
 			// Send a reset signal to the laser card because either button was pressed or the entire image has been sent.
                 	// In the latter case, this isn't strictly necessary, but in case something went wrong somewhere, why not do it?
