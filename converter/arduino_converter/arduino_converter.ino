@@ -20,32 +20,35 @@
 #define MICROSECONDS true
 #define MILLISECONDS false
 
+// Function to debug parts of the code where interrupts are disabled.
+bool statusPrevState = false;
+void toggleStatus() {
+  digitalWrite(STATUS, statusPrevState = !statusPrevState);
+}
+
+// Request callback for I2C, responsible for telling the sender when it can send the next packet.
+volatile bool isReady = false;
+void I2CRequest() {
+  Wire.write((char*)&isReady, 1);                           // Send the status flag to the master.
+}
+
 // Buffer for receiving I2C and sending through laser.
-volatile char buffer[BUFFER_SIZE];
+volatile char buffer[BUFFER_SIZE];                          // Volatile tells compiler not to cache values because variable could change outside of compilers scope.
 volatile int bufferPos = 0;
 volatile uint16_t transmissionPos = 0;
 
 // Receive event callback for I2C, triggers through interrupt every time data comes in.
 void I2CReceive(int amount) {
+  isReady = false;                                          // Set ready flag so that the master device waits for this device to finish processing this chunk.
   Wire.readBytes((char*)buffer + bufferPos, amount);
   bufferPos += amount;
   transmissionPos += amount;
+  // Don't unset ready flag here because the Wire library could do something after this function, which we want to account for.
 }
 
-// Put these inside of functions for future expandability. Not strictly necessary,
+// I've put these inside of functions for future expandability. Not strictly necessary,
 void resetBuffer() { bufferPos = 0; }
 void resetTransmission() { transmissionPos = 0; }
-
-// Request callback for I2C, responsible for telling the sender when it can send the next packet.
-volatile bool isReady = false;
-void I2CRequest() {
-  Wire.write((char*)&isReady, 1);                                  // Send the status flag to the master.
-}
-
-bool statusState = false;
-void toggleStatus() {
-  digitalWrite(STATUS, statusState = !statusState);
-}
 
 void setup() {
   // Debugging setup.
@@ -181,8 +184,7 @@ void loop() {
   
   // Receive connection descriptor through I2C and relay it through laser.
   while (true) {
-    Serial.flush();
-    //if (pollReset()) { return; }                              // Because returning starts the loop() function again.
+    if (pollReset()) { return; }                              // Because returning starts the loop() function again.
     if (bufferPos == sizeof(desc)) {
       isReady = false;                                        // Prevent further data transfer until laser transfer is complete.
       desc = *(ConnectionDescriptor*)buffer;
@@ -193,6 +195,7 @@ void loop() {
       resetTransmission();
       break;
     }
+    isReady = true;                                           // Reactivate data transfer in case I2CReceive turned it off.
   }
 
   Serial.println("Descriptor received. The following transmission is this many bytes long:");
@@ -203,11 +206,7 @@ void loop() {
 
   // Receive transmission and relay it through the laser.
   while (true) {
-    //Serial.println(bufferPos);
-    //Serial.println(isReady);
-    //Serial.flush();
-    //if (pollReset()) { return; }
-    DELAY(100);
+    if (pollReset()) { return; }
     if (bufferPos == BUFFER_SIZE) {
       isReady = false;
       noInterrupts();
@@ -228,6 +227,7 @@ void loop() {
       resetTransmission();
       break;
     }
+    isReady = true;                                           // Reactivate data transfer in case I2CReceive turned it off.
   }
 
   Serial.println(desc.transmissionLength);
