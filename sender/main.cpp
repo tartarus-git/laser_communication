@@ -18,8 +18,8 @@
 #define CARD_0 8							// Bit channels for laser card communication.
 #define CARD_1 9
 #define CARD_2 7
-#define CARD_3 15
-#define CARD_4 16
+#define CARD_3 10
+#define CARD_4 11
 #define CARD_5 1
 #define CARD_6 0
 #define CARD_7 2
