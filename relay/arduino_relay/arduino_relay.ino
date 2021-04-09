@@ -95,12 +95,12 @@ void loop() {
 
   interrupts();
 
-  //Serial.println("Connection descriptor received. Values:");
-  //Serial.println(desc.transmissionLength);
-  //Serial.println(desc.syncInterval);
-  //Serial.println(desc.bitDuration);
-  //Serial.println(desc.durationType);
-  //Serial.flush();
+  /*Serial.println("Connection descriptor received. Values:");
+  Serial.println(desc.transmissionLength);
+  Serial.println(desc.syncInterval);
+  Serial.println(desc.bitDuration);
+  Serial.println(desc.durationType);
+  Serial.flush();*/
 
   noInterrupts();
 

@@ -217,6 +217,7 @@ void loop() {
   LASER_WRITE(LOW);
   
   Serial.println("Awaiting transmission...");
+  Serial.flush();
 
   //isReady = true;                                             // Activate data transfer.
   digitalWrite(CARD_FREE_FLAG, HIGH);
@@ -240,6 +241,7 @@ void loop() {
   Serial.println("Descriptor received. The following transmission is this many bytes long:");
   Serial.println(desc.transmissionLength);
   Serial.println("Progress:");
+  Serial.flush();
 
   digitalWrite(CARD_FREE_FLAG, HIGH);                         // Reactivate data transfer so that new data can come in from master.
   
