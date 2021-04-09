@@ -48,6 +48,7 @@ void sync() {
 }
 
 char buffer[BUFFER_SIZE];
+uint32_t progress = 0;
 
 int16_t syncCounter = -1;
 
@@ -64,14 +65,17 @@ void setup() {
   // Wait for initialization. This is because the serial-to-usb chip is async. This isn't necessary for serial pins.
   while (!Serial) { }
 
-  Serial.println("Hi there.");
-
-  // TODO: Make the connection descriptor a reoccuring send. This will avoid having to restart over and over all the time.
+  //Serial.println("Hi there.");
 
   // Set the baseline brightness to the environmental brightness plus the clearance.
   baseline = analogRead(PHOTORESISTOR) + CLEARANCE;
+}
 
-  Serial.println(baseline);
+void loop() {
+
+  //Serial.println(baseline);
+
+  noInterrupts();
 
   // Receive the connection descriptor.
   for (int i = 0; i < sizeof(desc); i++) {
@@ -89,11 +93,16 @@ void setup() {
     DELAY(DESC_BIT_DURATION);
   }
 
-  Serial.println("Connection descriptor received. Values:");
-  Serial.println(desc.transmissionLength);
-  Serial.println(desc.syncInterval);
-  Serial.println(desc.bitDuration);
-  Serial.println(desc.durationType);
+  interrupts();
+
+  //Serial.println("Connection descriptor received. Values:");
+  //Serial.println(desc.transmissionLength);
+  //Serial.println(desc.syncInterval);
+  //Serial.println(desc.bitDuration);
+  //Serial.println(desc.durationType);
+  //Serial.flush();
+
+  noInterrupts();
 
   bool ledState = false;
   
@@ -113,12 +122,11 @@ void setup() {
       SLEEP;
     }
 
-    interrupts();
+    //interrupts();
 
     //Serial.println(length);
     //Serial.flush();
 
-    noInterrupts();
 
     // Invert state of the status LED to show that the correct length was retrieved. This is just for debugging.
     if (length == BUFFER_SIZE) {
@@ -171,13 +179,19 @@ void setup() {
     // Reset syncCounter.
     syncCounter = -1;
 
+    progress += length;
+    if (progress == desc.transmissionLength) {
+      break;
+    }
+
     interrupts();
 
     // Output the buffer to serial.
     //Serial.println("Sending thing...");
+    
     Serial.write(buffer, length);
     Serial.flush();
+
+    noInterrupts();
   }
 }
-
-void loop() { }

@@ -19,7 +19,9 @@
 
 // Pins.
 #define RESET A2                                            // Raspberry Pi sets this HIGH when this card should reset.
+#define RESET_WAIT 100                                      // In milliseconds.
 #define LASER A0
+#define LED A5
 #define STATUS 13
 
 // Laser.
@@ -42,6 +44,7 @@ volatile char buffer[BUFFER_SIZE];                          // Volatile tells co
 volatile int bufferPos = 0;
 volatile uint16_t transmissionPos = 0;
 
+// Interrupt triggers when data is dumped from master. Reads all the data out and increments counters.
 void laserCardProtocolDumpInterrupt() {
   if (digitalRead(CARD_0)) { buffer[bufferPos] |= HIGH; } else { buffer[bufferPos] &= 0b11111110; }
   if (digitalRead(CARD_1)) { buffer[bufferPos] |= HIGH << 1; } else { buffer[bufferPos] &= 0b11111101; }
@@ -57,6 +60,7 @@ void laserCardProtocolDumpInterrupt() {
   transmissionPos++;
 }
 
+// Reset functions for future additions if I want it.
 void resetBuffer() { bufferPos = 0; }
 void resetTransmission() { transmissionPos = 0; }
 
@@ -66,6 +70,9 @@ void setup() {
   
   // Laser setup.
   pinMode(LASER, OUTPUT);
+
+  // LED setup.
+  pinMode(LED, OUTPUT);
 
   // Reset pin setup.
   pinMode(RESET, INPUT);
@@ -108,7 +115,7 @@ void blocking_delay(int amount) {
 #define DELAY(amount) blocking_delay(amount)
 
 // Macro to make digitalWrite have almost exactly the same duration as analogRead. Useful for communication with other device.
-#define LASER_WRITE(state) digitalWrite(LASER, state); delayMicroseconds(98)
+#define LASER_WRITE(state) digitalWrite(LASER, state); digitalWrite(LED, state); delayMicroseconds(96)
 
 // Transmit the connection descriptor through the laser using the standard description bit duration.
 void transmitDescriptor() {
@@ -190,27 +197,36 @@ bool pollReset() {
   if (digitalRead(RESET)) {
     resetBuffer();
     resetTransmission();
+    digitalWrite(CARD_FREE_FLAG, LOW);
+    delay(RESET_WAIT);
     Serial.println("Reset triggered, prepared for new transmission.");
+
+    // Blink light so that the status is visible to someone without having to look at serial.
+    digitalWrite(LED, LOW);
+    delay(500);
+    digitalWrite(LED, HIGH);
+    delay(2000);
+    digitalWrite(LED, LOW);
+    
     return true;
   }
   return false;
 }
 
 void loop() {
+  LASER_WRITE(LOW);
+  
   Serial.println("Awaiting transmission...");
 
   //isReady = true;                                             // Activate data transfer.
   digitalWrite(CARD_FREE_FLAG, HIGH);
   
-  // Receive connection descriptor through I2C and relay it through laser.
+  // Receive connection descriptor through laser card protocol and relay it through laser.
   while (true) {
-    //Serial.flush();
-    //isReady = true;                                           // Reactivate data transfer in case I2CReceive turned it off.
-    //if (pollReset()) { return; }                              // Because returning starts the loop() function again.
-    delay(10);
+    delay(100);
+    if (pollReset()) { return; }                                // Because returning starts the loop() function again.
     if (bufferPos == sizeof(desc)) {
-      digitalWrite(CARD_FREE_FLAG, LOW);
-      //isReady = false;                                        // Prevent further data transfer until laser transfer is complete.
+      digitalWrite(CARD_FREE_FLAG, LOW);                        // Prevent further data from being transmitted from master while busy.
       desc = *(ConnectionDescriptor*)buffer;
       noInterrupts();
       transmitDescriptor();
@@ -219,44 +235,33 @@ void loop() {
       resetTransmission();
       break;
     }
-    //isReady = true;                                           // Reactivate data transfer in case I2CReceive turned it off.
   }
 
   Serial.println("Descriptor received. The following transmission is this many bytes long:");
   Serial.println(desc.transmissionLength);
   Serial.println("Progress:");
 
-  //isReady = true;                                             // Reactivate data transfer.
-
-  digitalWrite(CARD_FREE_FLAG, HIGH);
+  digitalWrite(CARD_FREE_FLAG, HIGH);                         // Reactivate data transfer so that new data can come in from master.
   
   // Receive transmission and relay it through the laser.
   while (true) {
-    //isReady = true;                                           // Reactivate data transfer in case I2CReceive turned it off.
-    Serial.println(bufferPos);
-    //Serial.println(numEvents);
-    Serial.flush();
+    //Serial.println(bufferPos);
+    //Serial.flush();
     delay(100);
-    //isReady = false;
-    //delay(100);
-    //isReady = true;                                           // Reactivate data transfer in case I2CReceive turned it off.
-    //if (pollReset()) { return; }
+    if (pollReset()) { return; }
     if (bufferPos == BUFFER_SIZE) {
-      digitalWrite(CARD_FREE_FLAG, LOW);
-      //isReady = false;
+      digitalWrite(CARD_FREE_FLAG, LOW);                      // Turn of data transfer while busy.
       noInterrupts();
       transmit(buffer, bufferPos);
       interrupts();
       Serial.println(transmissionPos);
       Serial.flush();
       resetBuffer();
-      //isReady = true;
-      digitalWrite(CARD_FREE_FLAG, HIGH);
+      digitalWrite(CARD_FREE_FLAG, HIGH);                     // Reactivate data transfer.
       continue;
     }
     if (transmissionPos == desc.transmissionLength) {
-      digitalWrite(CARD_FREE_FLAG, LOW);
-      //isReady = false;
+      digitalWrite(CARD_FREE_FLAG, LOW);                      // Turn of data transfer.
       noInterrupts();
       transmit(buffer, bufferPos);
       interrupts();
@@ -264,7 +269,6 @@ void loop() {
       resetTransmission();
       break;
     }
-    //isReady = true;                                           // Reactivate data transfer in case I2CReceive turned it off.
   }
 
   Serial.println(desc.transmissionLength);
