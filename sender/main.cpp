@@ -28,6 +28,9 @@
 #define CARD_TRIGGER_DURATION 500					// In microseconds.
 
 #define CARD_OPEN_FLAG 12
+#define CARD_OPEN_FLAG_POLL_WAIT 10
+
+#define CARD_TRANSMISSION_MIN_WAIT 1000
 
 #define BIT_MASK 0x01
 
@@ -37,7 +40,6 @@
 
 // Reset pin for arduino laser card.
 #define RESET 29
-#define RESET_WAIT 2000							// In milliseconds.
 
 // Laser.
 #define BUFFER_SIZE 1024
@@ -93,6 +95,7 @@ bool pollButton() {
         return false;
 }
 
+// This loads the corresponding bits onto the right pins and dumps each byte at a time to the slave.
 void sendToLaserCard(const uchar* buffer, int length) {
 	for (int bytePos = 0; bytePos < length; bytePos++) {
 		digitalWrite(CARD_0, buffer[bytePos] & BIT_MASK);
@@ -104,19 +107,26 @@ void sendToLaserCard(const uchar* buffer, int length) {
 		digitalWrite(CARD_6, (buffer[bytePos] >> 6) & BIT_MASK);
 		digitalWrite(CARD_7, buffer[bytePos] >> 7);
 		digitalWrite(CARD_TRIGGER, HIGH);
-		delayMicroseconds(CARD_TRIGGER_DURATION);
+		delayMicroseconds(CARD_TRIGGER_DURATION);		// Give the slave enough time to process dump.
 		digitalWrite(CARD_TRIGGER, LOW);
-		delayMicroseconds(CARD_TRIGGER_DURATION);
+		delayMicroseconds(CARD_TRIGGER_DURATION);		// Make sure it's low long enough for the slave to detect a rising edge on the next run.
 	}
 }
 
+// Wait for the laser card to set the CARD_OPEN_FLAG. This makes the master wait for each packet to be processed by the slave before sending the next one.
 bool waitForLaserCardOpen() {
 	while(true) {
-		if (digitalRead(CARD_OPEN_FLAG)) { return true; }
-		// Do push button things here.
-		delay(10);		// TODO: Make this into a constant because it looks better.
+		if (digitalRead(CARD_OPEN_FLAG)) { return false; }
+		if (pollButton()) {
+			log("Button press detected. Resetting...");
+			digitalWrite(RESET, HIGH);
+			while (!digitalRead(CARD_OPEN_FLAG)) { }
+			while (digitalRead(CARD_OPEN_FLAG)) { }
+			digitalWrite(RESET, LOW);
+			return true;
+		}
+		delay(CARD_OPEN_FLAG_POLL_WAIT);
 	}
-	return false;
 }
 
 int main() {
@@ -128,6 +138,7 @@ int main() {
 	pullUpDnControl(BUTTON, PUD_DOWN);
 	pinMode(RESET, OUTPUT);
 
+	// Set up connection to the laser card.
 	pinMode(CARD_0, OUTPUT);
 	pinMode(CARD_1, OUTPUT);
 	pinMode(CARD_2, OUTPUT);
@@ -163,9 +174,8 @@ int main() {
 			sendToLaserCard((uchar*)&desc, sizeof(desc));
 			int ni = BUFFER_SIZE;
 			for (int i = 0; i < IMAGE_SIZE; i = ni, ni += BUFFER_SIZE) {
-				delay(1000);			// TODO: Make this into a constant obviously.
-				waitForLaserCardOpen();
-				//delay(10000);
+				delay(CARD_TRANSMISSION_MIN_WAIT);
+				if (waitForLaserCardOpen()) { break; }
 				log("Packet arrived at photoresistor.");
 				if (ni > IMAGE_SIZE) {
 					sendToLaserCard(image.data + i, IMAGE_SIZE - i);
@@ -174,11 +184,6 @@ int main() {
 				}
 				sendToLaserCard(image.data + i, BUFFER_SIZE);
 			}
-			// Send a reset signal to the laser card because either button was pressed or the entire image has been sent.
-                	// In the latter case, this isn't strictly necessary, but in case something went wrong somewhere, why not do it?
-			digitalWrite(RESET, HIGH);
-                	delay(RESET_WAIT);
-                	digitalWrite(RESET, LOW);
 		}
 	}
 }
