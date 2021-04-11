@@ -79,7 +79,9 @@ void loop() {
 
   // Receive the connection descriptor.
   for (int i = 0; i < sizeof(desc); i++) {
+    while (analogRead(PHOTORESISTOR) > baseline) { }
     while (analogRead(PHOTORESISTOR) <= baseline) { }
+    DELAY(25);
     for (int j = 0; j < 8; j++) {
       DELAY(DESC_BIT_DURATION);
       if (analogRead(PHOTORESISTOR) > baseline) {
@@ -90,17 +92,16 @@ void loop() {
     }
     // Give the other device enough time to set up a synchronization point.
     DELAY(DESC_BIT_DURATION);
-    DELAY(DESC_BIT_DURATION);
   }
 
   interrupts();
 
-  /*Serial.println("Connection descriptor received. Values:");
-  Serial.println(desc.transmissionLength);
-  Serial.println(desc.syncInterval);
-  Serial.println(desc.bitDuration);
-  Serial.println(desc.durationType);
-  Serial.flush();*/
+  //Serial.println("Connection descriptor received. Values:");
+  //Serial.println(desc.transmissionLength);
+  //Serial.println(desc.syncInterval);
+  //Serial.println(desc.bitDuration);
+  //Serial.println(desc.durationType);
+  //Serial.flush();
 
   noInterrupts();
 
@@ -166,23 +167,18 @@ void loop() {
     // Receive the next byte.
     for (int j = 0; j < 7; j++) {
       if (analogRead(PHOTORESISTOR) > baseline) {
-        buffer[length] |= HIGH << j;
+        buffer[lastIndex] |= HIGH << j;
         SLEEP;
         continue;
       }
-      buffer[length] &= ~(HIGH << j);
+      buffer[lastIndex] &= ~(HIGH << j);
       SLEEP;
     }
-    if (analogRead(PHOTORESISTOR) > baseline) { buffer[length] |= HIGH << 7; }
-    else { buffer[length] &= ~(HIGH << 7); }
+    if (analogRead(PHOTORESISTOR) > baseline) { buffer[lastIndex] |= HIGH << 7; }
+    else { buffer[lastIndex] &= ~(HIGH << 7); }
 
     // Reset syncCounter.
     syncCounter = -1;
-
-    progress += length;
-    if (progress == desc.transmissionLength) {
-      break;
-    }
 
     interrupts();
 
@@ -192,6 +188,15 @@ void loop() {
     Serial.write(buffer, length);
     Serial.flush();
 
-    noInterrupts();
+    progress += length;
+    //Serial.println(progress);
+    //Serial.println(desc.transmissionLength);
+    if (progress == desc.transmissionLength) {
+      //Serial.println("Breaking the thing now...");
+      progress = 0;
+      break;
+    }
+
+    //noInterrupts();
   }
 }

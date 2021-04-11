@@ -110,6 +110,7 @@ namespace SerialReciever
 
         static void receive()
         {
+            Label:
             int width = 100;
             int height = 100;
 
@@ -134,7 +135,7 @@ namespace SerialReciever
                 if (pos == length)
                 {
                     Console.WriteLine("Received the entire image. Ready to receive the next one.");
-                    break;
+                    goto Label;
                 }
             }
         }
