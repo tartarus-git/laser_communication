@@ -9,6 +9,9 @@
 #include <opencv2/videoio.hpp>
 #include <opencv2/imgproc.hpp>
 
+// For interrupt handling.
+#include <csignal>
+
 // Image.
 #define IMAGE_WIDTH 100
 #define IMAGE_HEIGHT 100
@@ -66,12 +69,20 @@ cv::VideoCapture cap;
 cv::Mat image;
 
 // Code for shooting an image and resizing it to fit the desired dimensions.
-void shoot() {
+bool shoot() {
 	log("Capturing image...");
         cv::Mat original;
         cap >> original;
         log("Sucessfully captured image. Resizing...");
         cv::resize(original, image, cv::Size(IMAGE_WIDTH, IMAGE_HEIGHT));
+	cap.release();
+	// Initialize camera.
+        cap = cv::VideoCapture(0);
+        if (!cap.isOpened()) {
+                log("Failed to initialize the camera. Quitting...");
+                return false;
+        }
+	return true;
 }
 
 // TODO: Had some weird bugs when I left out pragma pack, even though it technically shouldn't change anything in this case, find out why.
@@ -129,6 +140,13 @@ bool waitForLaserCardOpen() {
 	}
 }
 
+void interruptHandler(int signum) {
+	log("Interrupt signal caught, shutting down...");
+	image.release();
+	cap.release();
+	exit(signum);
+}
+
 int main() {
 	// Set up WiringPi and pins.
 	wiringPiSetup();
@@ -150,26 +168,28 @@ int main() {
 	pinMode(CARD_TRIGGER, OUTPUT);
 	pinMode(CARD_OPEN_FLAG, INPUT);
 
-	// Initialize camera.
-	cap = cv::VideoCapture(0);
-	if (!cap.isOpened()) {
-		log("Failed to initialize the camera. Quitting...");
-		return 0;
-	}
-
 	// Connection descriptor setup.
 	desc.transmissionLength = IMAGE_SIZE;
 	printf("Image size: %d\n", IMAGE_SIZE);
-	desc.syncInterval = 2;
-	desc.bitDuration = 250;
+	desc.syncInterval = 1;
+	desc.bitDuration = 200;
 	desc.durationType = MICROSECONDS;
+
+	// Initialize camera.
+        cap = cv::VideoCapture(0);
+        if (!cap.isOpened()) {
+                log("Failed to initialize the camera. Quitting...");
+                return false;
+        }
+
+	std::signal(SIGINT, interruptHandler);
 
 	// Enter loop and wait for someone to press button.
 	while (true) {
 		delay(LOOP_SLEEP);
 		if (pollButton()) {					// If button is held down at this moment, shoot image and start sending.
 			log("Shooting image...");
-			shoot();
+			if (!shoot()) { return 0; }			// TODO: Make sure you don't have to release anything here.
 			log("Sending image to laser card...");
 			sendToLaserCard((uchar*)&desc, sizeof(desc));
 			int ni = BUFFER_SIZE;
